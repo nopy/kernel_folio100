@@ -146,7 +146,7 @@ extern "C"
  */
 #define NVRM_DFS_PARAM_APB_AP20 \
     NVRM_AP20_APB_MAX_KHZ, /* AP20 APB limit is lower than other buses */ \
-    24000,  /* Minimum domain frequency 24 MHz */ \
+    36000,  /* Minimum domain frequency 36 MHz */ \
     1000,   /* Frequency change upper band 1 MHz */ \
     1000,   /* Frequency change lower band 1 MHz */ \
     {          /* RT starvation control parameters */ \
@@ -285,6 +285,21 @@ extern "C"
 
 /// Core voltage in suspend
 #define NVRM_AP20_SUSPEND_CORE_MV (1000)
+
+/// Core and CPU voltage reliability requirements for some skus
+#define NVRM_AP20_RELIABILITY_CORE_MV(sku) \
+       ((((sku) == 23) || \
+         ((sku) == 24) || \
+         ((sku) == 20) || \
+         ((sku) == 27) || \
+         ((sku) == 28)) ? 1000 : 0)
+
+#define NVRM_AP20_RELIABILITY_CPU_MV(sku) \
+       ((((sku) == 23) || \
+         ((sku) == 24) || \
+         ((sku) == 20) || \
+         ((sku) == 27) || \
+         ((sku) == 28)) ? 850 : 0)
 
 /*****************************************************************************/
 

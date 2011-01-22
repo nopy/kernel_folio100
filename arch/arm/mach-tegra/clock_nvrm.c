@@ -43,6 +43,8 @@
 static LIST_HEAD(clocks);
 static DEFINE_SPINLOCK(clock_lock);
 static NvU32 clk_pwr_client;
+static NvU32 busy_pwr_client_2d;
+static NvU32 busy_pwr_client_3d;
 
 struct clk *get_tegra_clock_by_name(const char *name)
 {
@@ -100,10 +102,18 @@ static int tegra_periph_clk_enable(struct clk *c)
 		return -ENXIO;
 	}
 
-	/* max out emc when 3d is on */
+	/* max out emc when 2d or 3d is on */
 	if (NVRM_MODULE_ID_MODULE(c->module) == NvRmModuleID_3D) {
-		NvRmPowerBusyHint(s_hRmGlobal, NvRmDfsClockId_Emc, clk_pwr_client,
-				0xffffffff, NvRmFreqMaximum);
+		NvRmDfsBusyHint hint =
+			{NvRmDfsClockId_Emc, 0xffffffff, NvRmFreqMaximum, true};
+		NvRmPowerBusyHintMulti(s_hRmGlobal, busy_pwr_client_3d, &hint, 1,
+			NvRmDfsBusyHintSyncMode_Async);
+	} else if (NVRM_MODULE_ID_MODULE(c->module) == NvRmModuleID_2D) {
+		NvRmDfsBusyHint hint =
+			{NvRmDfsClockId_Emc, 0xffffffff, NvRmFreqMaximum, true};
+		hint.BoostKHz = NvRmPrivDfsGetMaxKHz(NvRmDfsClockId_Emc) / 2;
+		NvRmPowerBusyHintMulti(s_hRmGlobal, busy_pwr_client_2d, &hint, 1,
+			NvRmDfsBusyHintSyncMode_Async);
 	}
 
 	return 0;
@@ -114,7 +124,13 @@ static void tegra_periph_clk_disable(struct clk *c)
 	NvError e;
 
 	if (NVRM_MODULE_ID_MODULE(c->module) == NvRmModuleID_3D) {
-		NvRmPowerBusyHint(s_hRmGlobal, NvRmDfsClockId_Emc, clk_pwr_client, 0, 0);
+		NvRmDfsBusyHint hint = {NvRmDfsClockId_Emc, 0, 0, true};
+		NvRmPowerBusyHintMulti(s_hRmGlobal, busy_pwr_client_3d, &hint, 1,
+			NvRmDfsBusyHintSyncMode_Async);
+	} else if (NVRM_MODULE_ID_MODULE(c->module) == NvRmModuleID_2D) {
+		NvRmDfsBusyHint hint = {NvRmDfsClockId_Emc, 0, 0, true};
+		NvRmPowerBusyHintMulti(s_hRmGlobal, busy_pwr_client_2d, &hint, 1,
+			NvRmDfsBusyHintSyncMode_Async);
 	}
 
 	e = NvRmPowerModuleClockControl(s_hRmGlobal, c->module,
@@ -147,7 +163,9 @@ static int tegra_periph_clk_set_rate(struct clk *c, unsigned long rate)
 		min = c->rate_min;
 		freq = max_t(NvRmFreqKHz, c->rate_min, freq);
 	} else {
-		max = min = freq;
+		/* If no tolerance, and no low limit - let RM find the
+		   best approximation to the target */
+		max = min = NvRmFreqUnspecified;
 	}
 
 	e = NvRmPowerModuleClockConfig(s_hRmGlobal, c->module, clk_pwr_client,
@@ -183,9 +201,9 @@ static unsigned long tegra_periph_clk_get_rate(struct clk *c)
 static long tegra_periph_clk_round_rate(struct clk *c, unsigned long rate)
 {
 	NvRmFreqKHz max;
-	/* TODO: rm reports an unachievable max rate for host */
+	/* Keep Host on low power PLLP */
 	if (c->module == NvRmModuleID_GraphicsHost)
-		max = 111000;
+		max = NVRM_PLLP_FIXED_FREQ_KHZ / 2;
 	else
 		max = NvRmPowerModuleGetMaxFrequency(s_hRmGlobal, c->module);
 	return min(((unsigned long)max) * 1000, rate);
@@ -428,15 +446,18 @@ EXPORT_SYMBOL(clk_round_rate);
 
 void __init tegra_init_clock(void)
 {
-	NvError e;
+	NvError e = NvSuccess;
 	struct clk *cpu_clk = NULL;
 	unsigned long rate = 0;
 
-	e = NvRmOpenNew(&s_hRmGlobal);
+	if (!s_hRmGlobal)
+		e = NvRmOpenNew(&s_hRmGlobal);
 	BUG_ON(e!=NvSuccess);
 
 	NvRmPrivPostRegulatorInit(s_hRmGlobal);
 	NvRmPowerRegister(s_hRmGlobal, 0, &clk_pwr_client);
+	NvRmPowerRegister(s_hRmGlobal, 0, &busy_pwr_client_2d);
+	NvRmPowerRegister(s_hRmGlobal, 0, &busy_pwr_client_3d);
 	tegra2_init_clocks();
 
 #ifdef CONFIG_USE_ARM_TWD_PRESCALER
@@ -453,6 +474,7 @@ void __init tegra_init_clock(void)
 #ifdef CONFIG_PM
 #define CLK_RESET_RST_DEVICES_L		0x04
 #define CLK_RESET_RST_DEVICES_NUM	3
+#define CLK_RESET_PROPAGATION_US	10
 
 #define CLK_RESET_CLK_OUT_ENB_L		0x10
 #define CLK_RESET_CLK_OUT_ENB_H		0x14
@@ -467,6 +489,17 @@ void __init tegra_init_clock(void)
 #define CLK_RESET_OSC_CTRL		0x50
 #define CLK_RESET_OSC_CTRL_MASK		0x3f2	/* drive strength & bypass */
 
+#define CLK_RESET_PLLC_BASE		0x80
+#define CLK_RESET_PLLC_MISC		0x8C
+#define CLK_RESET_PLLA_BASE		0xB0
+#define CLK_RESET_PLLA_MISC		0xBC
+#define CLK_RESET_PLLD_BASE		0xD0
+#define CLK_RESET_PLLD_MISC		0xDC
+#define CLK_RESET_NON_BOOT_PLLS_NUM	3
+#define CLK_RESET_PLL_ENABLE_MASK	(0x1 << 30)
+#define CLK_RESET_PLL_STAB_US		300
+#define CLK_RESET_PLL_STAB_LONG_US	1000
+
 #define CLK_RESET_CLK_SOURCE_I2S1	0x100
 #define CLK_RESET_CLK_SOURCE_EMC	0x19c
 #define CLK_RESET_CLK_SOURCE_OSC	0x1fc
@@ -474,6 +507,7 @@ void __init tegra_init_clock(void)
 	(((CLK_RESET_CLK_SOURCE_OSC - CLK_RESET_CLK_SOURCE_I2S1) / 4) + 1 - 1)
 
 static u32 clk_rst[CLK_RESET_RST_DEVICES_NUM + CLK_RESET_CLK_OUT_ENB_NUM +
+		   (CLK_RESET_NON_BOOT_PLLS_NUM * 2) +
 		   CLK_RESET_CLK_SOURCE_NUM + 3];
 
 void tegra_clk_suspend(void)
@@ -483,6 +517,13 @@ void tegra_clk_suspend(void)
 	u32 *ctx = clk_rst;
 
 	*ctx++ = readl(car + CLK_RESET_OSC_CTRL) & CLK_RESET_OSC_CTRL_MASK;
+
+	*ctx++ = readl(car + CLK_RESET_PLLC_MISC);
+	*ctx++ = readl(car + CLK_RESET_PLLC_BASE);
+	*ctx++ = readl(car + CLK_RESET_PLLA_MISC);
+	*ctx++ = readl(car + CLK_RESET_PLLA_BASE);
+	*ctx++ = readl(car + CLK_RESET_PLLD_MISC);
+	*ctx++ = readl(car + CLK_RESET_PLLD_BASE);
 
 	for (offs=CLK_RESET_CLK_SOURCE_I2S1;
 	     offs<=CLK_RESET_CLK_SOURCE_OSC; offs+=4) {
@@ -517,6 +558,30 @@ void tegra_clk_resume(void)
 	temp = readl(car + CLK_RESET_OSC_CTRL) & ~CLK_RESET_OSC_CTRL_MASK;
 	temp |= *ctx++;
 	writel(temp, car + CLK_RESET_OSC_CTRL);
+	wmb();
+
+	writel(*ctx++, car + CLK_RESET_PLLC_MISC);
+	temp = *ctx & (~CLK_RESET_PLL_ENABLE_MASK);
+	writel(temp, car + CLK_RESET_PLLC_BASE);
+	wmb();
+	writel(*ctx++, car + CLK_RESET_PLLC_BASE);
+
+	writel(*ctx++, car + CLK_RESET_PLLA_MISC);
+	temp = *ctx & (~CLK_RESET_PLL_ENABLE_MASK);
+	writel(temp, car + CLK_RESET_PLLA_BASE);
+	wmb();
+	writel(*ctx++, car + CLK_RESET_PLLA_BASE);
+
+	writel(*ctx++, car + CLK_RESET_PLLD_MISC);
+	temp = *ctx & (~CLK_RESET_PLL_ENABLE_MASK);
+	writel(temp, car + CLK_RESET_PLLD_BASE);
+	wmb();
+	temp = *ctx++;
+	if (temp & CLK_RESET_PLL_ENABLE_MASK) {
+		writel(temp, car + CLK_RESET_PLLD_BASE);
+		udelay(CLK_RESET_PLL_STAB_LONG_US);
+	} else
+		udelay(CLK_RESET_PLL_STAB_US);
 
 	writel(CLK_RESET_CLK_OUT_ENB_L_ALL, car + CLK_RESET_CLK_OUT_ENB_L);
 	writel(CLK_RESET_CLK_OUT_ENB_H_ALL, car + CLK_RESET_CLK_OUT_ENB_H);
@@ -530,6 +595,7 @@ void tegra_clk_resume(void)
 		writel(*ctx++, car + offs);
 	}
 	wmb();
+	udelay(CLK_RESET_PROPAGATION_US);
 
 	offs = CLK_RESET_RST_DEVICES_L;
 	for (i=0; i<CLK_RESET_RST_DEVICES_NUM; i++)

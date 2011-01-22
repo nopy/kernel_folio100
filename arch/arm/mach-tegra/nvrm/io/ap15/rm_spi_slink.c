@@ -57,7 +57,7 @@
 
 #include "linux/module.h"
 #include "mach/dma.h"
-
+#include "linux/err.h"
 
 // Combined maximum spi/slink controllers
 #define MAX_SPI_SLINK_INSTANCE (MAX_SLINK_CONTROLLERS + MAX_SPI_CONTROLLERS)
@@ -513,10 +513,10 @@ static NvError AllocateDmas(NvRmSpiHandle hRmSpiSlink)
     hRmSpiSlink->hTxDma = NULL;
 
     hRmSpiSlink->hRxDma = tegra_dma_allocate_channel(TEGRA_DMA_MODE_ONESHOT);
-    if (hRmSpiSlink->hRxDma)
+    if (!IS_ERR_OR_NULL(hRmSpiSlink->hRxDma))
     {
         hRmSpiSlink->hTxDma = tegra_dma_allocate_channel(TEGRA_DMA_MODE_ONESHOT);
-        if (!hRmSpiSlink->hTxDma)
+        if (IS_ERR_OR_NULL(hRmSpiSlink->hTxDma))
         {
             tegra_dma_free_channel(hRmSpiSlink->hRxDma);
             hRmSpiSlink->hRxDma = NULL;
@@ -632,6 +632,7 @@ static NvBool HandleTransferCompletion(NvRmSpiHandle hRmSpiSlink)
         CurrPacketSize = NV_MIN(hRmSpiSlink->CurrTransInfo.PacketsPerWord * WordsWritten,
                             hRmSpiSlink->CurrTransInfo.TxPacketsRemaining);
         hHwInt->HwSetDmaTransferSizeFxn(&hRmSpiSlink->HwRegs, CurrPacketSize);
+        hRmSpiSlink->IsIntDoneDue = NV_FALSE;
         hHwInt->HwStartTransferFxn(&hRmSpiSlink->HwRegs,
                                                 NV_FALSE);
         hRmSpiSlink->CurrTransInfo.CurrPacketCount = CurrPacketSize;
@@ -650,6 +651,7 @@ static NvBool HandleTransferCompletion(NvRmSpiHandle hRmSpiSlink)
                                     hRmSpiSlink->CurrTransInfo.PacketsPerWord));
         hRmSpiSlink->CurrTransInfo.CurrPacketCount = CurrPacketSize;
         hHwInt->HwSetDmaTransferSizeFxn(&hRmSpiSlink->HwRegs, CurrPacketSize);
+        hRmSpiSlink->IsIntDoneDue = NV_FALSE;
         hHwInt->HwStartTransferFxn(&hRmSpiSlink->HwRegs, NV_FALSE);
         return NV_FALSE;
     }
@@ -666,16 +668,16 @@ static void SpiSlinkIsr(void *args)
     /* If apb dma is used then postpone the handling in caller context */
     if (hRmSpiSlink->IsUsingApbDma)
     {
-        NvOsSemaphoreSignal(hRmSpiSlink->hSynchSema);
         hRmSpiSlink->IsIntDoneDue = NV_TRUE;
+        NvOsSemaphoreSignal(hRmSpiSlink->hSynchSema);
         return;
     }
 
     /* Handle the transfer completion here only for non dma transfer */
     IsTransferCompleted = HandleTransferCompletion(hRmSpiSlink);
+    hRmSpiSlink->IsIntDoneDue = NV_FALSE;
     if (IsTransferCompleted)
         NvOsSemaphoreSignal(hRmSpiSlink->hSynchSema);
-    hRmSpiSlink->IsIntDoneDue = NV_FALSE;
     NvRmInterruptDone(hRmSpiSlink->SpiInterruptHandle);
 }
 
@@ -834,8 +836,10 @@ WaitForTransferCompletion(
         NvRmModuleReset(hRmSpiSlink->hDevice,
                     NVRM_MODULE_ID(hRmSpiSlink->RmModuleId, hRmSpiSlink->InstanceId));
         hRmSpiSlink->CurrentDirection = SerialHwDataFlow_None;
-        if ((!IsPoll) && (hRmSpiSlink->IsIntDoneDue))
+        if ((!IsPoll) && (hRmSpiSlink->IsIntDoneDue)) {
+        	hRmSpiSlink->IsIntDoneDue = NV_FALSE;
                 NvRmInterruptDone(hRmSpiSlink->SpiInterruptHandle);
+        }
 
         return Error;
     }
@@ -908,8 +912,10 @@ WaitForTransferCompletion(
         Error = (hRmSpiSlink->RxTransferStatus)? hRmSpiSlink->RxTransferStatus:
                                     hRmSpiSlink->TxTransferStatus;
     }
-    if ((!IsPoll) && (hRmSpiSlink->IsIntDoneDue))
+    if ((!IsPoll) && (hRmSpiSlink->IsIntDoneDue)) {
+            hRmSpiSlink->IsIntDoneDue = NV_FALSE;
             NvRmInterruptDone(hRmSpiSlink->SpiInterruptHandle);
+    }
     return Error;
 }
 
@@ -941,8 +947,7 @@ static void BoostFrequency(NvRmSpiHandle hRmSpiSlink, NvBool IsBoost, NvU32 Tran
     {
         if (TransactionSize > hRmSpiSlink->HwRegs.MaxWordTransfer)
         {
-            if (!((hRmSpiSlink->IsPmuInterface) &&
-                   (hRmSpiSlink->PmuChipSelectId == hRmSpiSlink->CurrTransferChipSelId)))
+            if (!(hRmSpiSlink->IsPmuInterface))
             {
                 hRmSpiSlink->BusyHints[0].BoostKHz = 150000; // Emc
                 hRmSpiSlink->BusyHints[0].BoostDurationMs
@@ -967,8 +972,7 @@ static void BoostFrequency(NvRmSpiHandle hRmSpiSlink, NvBool IsBoost, NvU32 Tran
     {
         if (hRmSpiSlink->IsFreqBoosted)
         {
-            if (!((hRmSpiSlink->IsPmuInterface) &&
-                   (hRmSpiSlink->PmuChipSelectId == hRmSpiSlink->CurrTransferChipSelId)))
+            if (!(hRmSpiSlink->IsPmuInterface))
             {
                 hRmSpiSlink->BusyHints[0].BoostKHz = 0; // Emc
                 hRmSpiSlink->BusyHints[1].BoostKHz = 0; // Ahb
@@ -1363,6 +1367,11 @@ static NvError CreateSpiSlinkChannelHandle(
 
         // Set chip select to non active state.
         hRmSpiSlink->hHwInterface->HwControllerInitializeFxn(&hRmSpiSlink->HwRegs);
+
+        // Set functional mode.
+        hRmSpiSlink->hHwInterface->HwSetFunctionalModeFxn(&hRmSpiSlink->HwRegs,
+                      hRmSpiSlink->IsMasterMode);
+
         for (ChipSelIndex = 0; ChipSelIndex < MAX_CHIPSELECT_PER_INSTANCE; ++ChipSelIndex)
         {
             hRmSpiSlink->IsCurrentChipSelStateHigh[ChipSelIndex] = NV_TRUE;
@@ -1421,8 +1430,8 @@ SetChipSelectSignalLevel(
             PrefClockFreqInKHz = (hRmSpiSlink->RmModuleId == NvRmModuleID_Slink)?
                                 (ClockSpeedInKHz << 2): (ClockSpeedInKHz);
             Error = NvRmPowerModuleClockConfig(hRmSpiSlink->hDevice,
-                                          ModuleId, 0, PrefClockFreqInKHz,
-                                          NvRmFreqUnspecified, &PrefClockFreqInKHz,
+                                          ModuleId, 0, NvRmFreqUnspecified,
+                                          PrefClockFreqInKHz, &PrefClockFreqInKHz,
                                           1, &ConfiguredClockFreqInKHz, 0);
             if (Error)
                 return Error;
@@ -1436,10 +1445,16 @@ SetChipSelectSignalLevel(
         if (hRmSpiSlink->IsMasterMode != hRmSpiSlink->HwRegs.IsMasterMode)
             hHwIntf->HwSetFunctionalModeFxn(&hRmSpiSlink->HwRegs, hRmSpiSlink->IsMasterMode);
 
-        if ((hRmSpiSlink->IsMasterMode) && ((IsOnlyUseSWCS) || (!hRmSpiSlink->HwRegs.IsHwChipSelectSupported) ||
-                                          (!pDevInfo->CanUseHwBasedCs)))
+        IsHigh = (pDevInfo->ChipSelectActiveLow)? NV_FALSE: NV_TRUE;
+        if (!hRmSpiSlink->IsMasterMode)
         {
-            IsHigh = (pDevInfo->ChipSelectActiveLow)? NV_FALSE: NV_TRUE;
+                hHwIntf->HwSetSlaveCsIdFxn(&hRmSpiSlink->HwRegs, ChipSelectId, IsHigh);
+                return NvSuccess;
+        }
+
+        if ((IsOnlyUseSWCS) || (!hRmSpiSlink->HwRegs.IsHwChipSelectSupported) ||
+                                          (!pDevInfo->CanUseHwBasedCs))
+        {
             hHwIntf->HwSetChipSelectLevelFxn(&hRmSpiSlink->HwRegs, ChipSelectId, IsHigh);
             hRmSpiSlink->IsChipSelConfigured = NV_TRUE;
             hRmSpiSlink->IsCurrentlySwBasedChipSel = NV_TRUE;
@@ -1452,9 +1467,14 @@ SetChipSelectSignalLevel(
     }
     else
     {
+        IsHigh = (pDevInfo->ChipSelectActiveLow)? NV_TRUE: NV_FALSE;
+        if (!hRmSpiSlink->IsMasterMode)
+        {
+                hHwIntf->HwSetSlaveCsIdFxn(&hRmSpiSlink->HwRegs, ChipSelectId, IsHigh);
+                return NvSuccess;
+        }
         if (IsOnlyUseSWCS || hRmSpiSlink->IsCurrentlySwBasedChipSel)
         {
-            IsHigh = (pDevInfo->ChipSelectActiveLow)? NV_TRUE: NV_FALSE;
             hHwIntf->HwSetChipSelectLevelFxn(&hRmSpiSlink->HwRegs, ChipSelectId, IsHigh);
             if (hRmSpiSlink->HwRegs.IdleSignalMode != hRmSpiSlink->HwRegs.CurrSignalMode)
                 hHwIntf->HwSetSignalModeFxn(&hRmSpiSlink->HwRegs, hRmSpiSlink->HwRegs.IdleSignalMode);
@@ -1923,6 +1943,7 @@ MasterModeReadWriteCpu(
         
         hRmSpiSlink->hHwInterface->HwSetDmaTransferSizeFxn(&hRmSpiSlink->HwRegs,
                                     hRmSpiSlink->CurrTransInfo.CurrPacketCount);
+        hRmSpiSlink->IsIntDoneDue = NV_FALSE;
         hRmSpiSlink->hHwInterface->HwStartTransferFxn(&hRmSpiSlink->HwRegs, NV_TRUE);
 
         WaitForTransferCompletion(hRmSpiSlink, NV_WAIT_INFINITE, IsPolling);
@@ -2108,6 +2129,7 @@ static NvError MasterModeReadWriteDma(
             }
         }
 
+        hRmSpiSlink->IsIntDoneDue = NV_FALSE;
         if (!Error)
             hRmSpiSlink->hHwInterface->HwStartTransferFxn(&hRmSpiSlink->HwRegs, NV_TRUE);
 
@@ -2211,6 +2233,7 @@ static NvError SlaveModeSpiStartReadWriteCpu(
     hRmSpiSlink->hHwInterface->HwSetDmaTransferSizeFxn(&hRmSpiSlink->HwRegs,
                     hRmSpiSlink->CurrTransInfo.CurrPacketCount);
 
+    hRmSpiSlink->IsIntDoneDue = NV_FALSE;
     hRmSpiSlink->hHwInterface->HwStartTransferFxn(&hRmSpiSlink->HwRegs, NV_TRUE);
 
     return Error;
@@ -2337,6 +2360,7 @@ static NvError SlaveModeSpiStartReadWriteDma(
         }
     }
 
+    hRmSpiSlink->IsIntDoneDue = NV_FALSE;
     if (!Error)
         hRmSpiSlink->hHwInterface->HwStartTransferFxn(&hRmSpiSlink->HwRegs, NV_TRUE);
     return Error;

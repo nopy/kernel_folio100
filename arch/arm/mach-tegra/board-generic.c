@@ -177,7 +177,7 @@ static struct platform_device *platform_devices[] = {
 };
 
 static struct i2c_board_info bus0_i2c_devices[] = {
-#ifdef CONFIG_SENSORS_ISL29018
+#ifdef CONFIG_ISL29018
 	{
 		I2C_BOARD_INFO("isl29018", 0x44),
 		.irq = (INT_GPIO_BASE + TEGRA_GPIO_PZ2),
@@ -185,11 +185,16 @@ static struct i2c_board_info bus0_i2c_devices[] = {
 #endif
 };
 
-static struct i2c_board_info bus3_i2c_devices[] = {
+static struct i2c_board_info bus4_i2c_devices[] = {
 #ifdef CONFIG_SENSORS_AK8975
 	{
 		I2C_BOARD_INFO("mm_ak8975", 0x0C),
 		.irq = (INT_GPIO_BASE + TEGRA_GPIO_PN5),
+	},
+#endif
+#ifdef CONFIG_SENSORS_LM90
+	{
+		I2C_BOARD_INFO("nct1008", 0x4C),
 	},
 #endif
 };
@@ -200,9 +205,26 @@ void __init i2c_device_setup(void)
 		i2c_register_board_info(0, bus0_i2c_devices,
 					ARRAY_SIZE(bus0_i2c_devices));
 
-	if (ARRAY_SIZE(bus3_i2c_devices))
-		i2c_register_board_info(3, bus3_i2c_devices,
-					ARRAY_SIZE(bus3_i2c_devices));
+	if (ARRAY_SIZE(bus4_i2c_devices))
+		i2c_register_board_info(4, bus4_i2c_devices,
+					ARRAY_SIZE(bus4_i2c_devices));
+}
+
+// enable 32Khz clock used by bcm4329 wifi, bluetooth and gps
+static void __init tegra_setup_32khz_clock(void)
+{
+	int RequestedPeriod, ReturnedPeriod;
+	NvOdmServicesPwmHandle hOdmPwm = NULL;
+
+	hOdmPwm = NvOdmPwmOpen();
+	if (!hOdmPwm) {
+		pr_err("%s: failed to open NvOdmPwmOpen\n", __func__);
+		return;
+	}
+	RequestedPeriod = 0;
+	NvOdmPwmConfig(hOdmPwm, NvOdmPwmOutputId_Blink,
+		NvOdmPwmMode_Blink_32KHzClockOutput, 0, &RequestedPeriod, &ReturnedPeriod);
+	NvOdmPwmClose(hOdmPwm);
 }
 
 extern void __init tegra_setup_nvodm(bool standard_i2c, bool standard_spi);
@@ -273,13 +295,118 @@ static void __init do_system_init(bool standard_i2c, bool standard_spi)
 	platform_add_devices(platform_devices, ARRAY_SIZE(platform_devices));
 }
 
+#ifdef CONFIG_BT_BLUESLEEP
+static noinline void __init tegra_setup_bluesleep(void)
+{
+	struct platform_device *pdev = NULL;
+	struct resource *res;
+
+	pdev = platform_device_alloc("bluesleep", 0);
+	if (!pdev) {
+		pr_err("unable to allocate platform device for bluesleep");
+		return;
+	}
+
+	res = kzalloc(sizeof(struct resource) * 3, GFP_KERNEL);
+	if (!res) {
+		pr_err("unable to allocate resource for bluesleep\n");
+		goto err_free_dev;
+	}
+
+	res[0].name   = "gpio_host_wake";
+	res[0].start  = TEGRA_GPIO_PU6;
+	res[0].end    = TEGRA_GPIO_PU6;
+	res[0].flags  = IORESOURCE_IO;
+
+	res[1].name   = "gpio_ext_wake";
+	res[1].start  = TEGRA_GPIO_PU1;
+	res[1].end    = TEGRA_GPIO_PU1;
+	res[1].flags  = IORESOURCE_IO;
+
+	res[2].name   = "host_wake";
+	res[2].start  = gpio_to_irq(TEGRA_GPIO_PU6);
+	res[2].end    = gpio_to_irq(TEGRA_GPIO_PU6);
+	res[2].flags  = IORESOURCE_IRQ | IORESOURCE_IRQ_HIGHEDGE ;
+
+	if (platform_device_add_resources(pdev, res, 3)) {
+		pr_err("unable to add resources to bluesleep device\n");
+		goto err_free_res;
+	}
+
+	if (platform_device_add(pdev)) {
+		pr_err("unable to add bluesleep device\n");
+		goto err_free_res;
+	}
+	return;
+
+err_free_res:
+	kfree(res);
+err_free_dev:
+	platform_device_put(pdev);
+	return;
+}
+#else
+static inline void tegra_setup_bluesleep(void) { }
+#endif
+#ifdef CONFIG_BT_BLUESLEEP
+static noinline void __init tegra_setup_bluesleep_csr(void)
+{
+	struct platform_device *pdev = NULL;
+	struct resource *res;
+
+	pdev = platform_device_alloc("bluesleep", 0);
+	if (!pdev) {
+		pr_err("unable to allocate platform device for bluesleep");
+		return;
+	}
+
+	res = kzalloc(sizeof(struct resource) * 2, GFP_KERNEL);
+	if (!res) {
+		pr_err("unable to allocate resource for bluesleep\n");
+		goto err_free_dev;
+	}
+
+	res[0].name   = "gpio_host_wake";
+	res[0].start  = TEGRA_GPIO_PU6;
+	res[0].end    = TEGRA_GPIO_PU6;
+	res[0].flags  = IORESOURCE_IO;
+
+	res[1].name   = "host_wake";
+	res[1].start  = gpio_to_irq(TEGRA_GPIO_PU6);
+	res[1].end    = gpio_to_irq(TEGRA_GPIO_PU6);
+	res[1].flags  = IORESOURCE_IRQ | IORESOURCE_IRQ_LOWEDGE;
+
+	if (platform_device_add_resources(pdev, res, 2)) {
+		pr_err("unable to add resources to bluesleep device\n");
+		goto err_free_res;
+	}
+
+	if (platform_device_add(pdev)) {
+		pr_err("unable to add bluesleep device\n");
+		goto err_free_res;
+	}
+	return;
+
+err_free_res:
+	kfree(res);
+err_free_dev:
+	platform_device_put(pdev);
+	return;
+}
+#else
+static inline void tegra_setup_bluesleep_csr(void) { }
+#endif
+
+
 static void __init tegra_harmony_init(void)
 {
 #ifdef CONFIG_USB_ANDROID
 	tegra_android_platform.product_name = harmony_dev;
 #endif
 	do_system_init(true, true);
+	tegra_setup_bluesleep_csr();
 }
+
 
 static void __init tegra_ventana_init(void)
 {
@@ -288,6 +415,9 @@ static void __init tegra_ventana_init(void)
 #endif
 	do_system_init(false, true);
 	i2c_device_setup();
+	tegra_setup_32khz_clock();
+	tegra_setup_bluesleep();
+	ventana_setup_wifi();
 }
 
 static void __init tegra_generic_init(void)
@@ -297,6 +427,7 @@ static void __init tegra_generic_init(void)
 #endif
 	do_system_init(true, true);
         register_spi_ipc_devices();
+	tegra_setup_bluesleep_csr();
 }
 
 MACHINE_START(VENTANA, "NVIDIA Ventana Development System")

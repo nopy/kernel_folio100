@@ -43,6 +43,9 @@
 #include "tegra_sndfx.h"
 
 
+#define I2S1	0
+#define I2S2	1
+
 #define INIT_TIMEOUT 5000
 #define PLAY_TIMEOUT 5000
 #define REC_TIMEOUT 5000
@@ -412,12 +415,22 @@ struct tegra_audio_data {
 	NvRmMemHandle mem_handle[2];
 	NvAudioFxObjectHandle mvolume;
 	NvAudioFxObjectHandle mi2s1;
+	NvAudioFxObjectHandle i2s1_play_mix;
+	NvAudioFxObjectHandle i2s2_play_mix;
+	NvAudioFxObjectHandle i2s1_rec_split;
+	NvAudioFxObjectHandle i2s2_rec_split;
 	NvAudioFxObjectHandle mroute;
-	NvAudioFxIoDevice mi2s1_device_available;
 	NvAudioFxIoDevice mspdif_device_available;
 	int spdif_plugin;
 	int i2s1volume;
+	int device_id;
 	struct mutex lock;
+};
+
+struct tegra_audio_state_t {
+	NvAudioFxIoDevice devices_available;
+	NvAudioFxMode audio_mode;
+	struct mutex mutex_lock;
 };
 
 int tegra_audiofx_init(struct tegra_audio_data* tegra_snd_cx);
@@ -425,12 +438,14 @@ NvError tegra_audiofx_createfx(struct tegra_audio_data *audio_context);
 void tegra_audiofx_destroyfx(struct tegra_audio_data *audio_context);
 NvError tegra_audiofx_create_output(NvRmDeviceHandle,
 				    NvAudioFxMixerHandle,
-				    StandardPath*);
+				    StandardPath*,
+				    NvAudioFxObjectHandle hSource);
 NvError tegra_audiofx_destroy_output(StandardPath* pPath);
 NvError tegra_audiofx_create_input(NvRmDeviceHandle hRmDevice,
 				NvAudioFxMixerHandle hMixer,
 				StandardPath* pPath,
-				InputSelection InputSelect);
+				InputSelection InputSelect,
+				NvAudioFxObjectHandle hSource);
 NvError tegra_audiofx_destroy_input(StandardPath* pPath);
 NvError tegra_audiofx_route(struct tegra_audio_data* tegra_snd_cx);
 NvError tegra_transport_init(NvddkAudioFxFxnTable* FxTransportFxFxnTable);

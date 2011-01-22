@@ -1,35 +1,20 @@
 /*
  * Copyright (c) 2009 NVIDIA Corporation.
- * All rights reserved.
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
  *
- * Redistributions of source code must retain the above copyright notice,
- * this list of conditions and the following disclaimer.
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
  *
- * Redistributions in binary form must reproduce the above copyright notice,
- * this list of conditions and the following disclaimer in the documentation
- * and/or other materials provided with the distribution.
- *
- * Neither the name of the NVIDIA Corporation nor the names of its contributors
- * may be used to endorse or promote products derived from this software
- * without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
- *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
-
 #include "max8907b.h"
 #include "max8907b_i2c.h"
 #include "max8907b_reg.h"
@@ -294,7 +279,7 @@ NvBool Max8907bRtcI2cReadTime(
     for (i = 0; i < MAX8907B_I2C_RETRY_CNT; i++)
     {
         NvU32 TransactionCount = 0;
-        ReadBuffer[0] = Addr & 0xFF;
+        ReadBuffer[0] = Addr;
 
         TransactionInfo[TransactionCount].Address = MAX8907B_RTC_SLAVE_ADDR;
         TransactionInfo[TransactionCount].Buf = &ReadBuffer[0];
@@ -363,3 +348,100 @@ NvBool Max8907bRtcI2cReadTime(
     return NV_FALSE;
 }
 
+
+NvBool Max8907bRtcI2cWrite8(
+   NvOdmPmuDeviceHandle hDevice,
+   NvU8 Addr,
+   NvU8 Data)
+{
+    NvU32 i;
+    NvU8 WriteBuffer[2];
+    NvOdmI2cStatus  status = NvOdmI2cStatus_Success;
+    Max8907bPrivData *hPmu = (Max8907bPrivData*)hDevice->pPrivate;
+    NvOdmI2cTransactionInfo TransactionInfo;
+
+    NVODMPMU_PRINTF(("\n RTC I2C write: Addr=0x%x, Data=0x%x ", Addr, Data));
+    for (i = 0; i < MAX8907B_I2C_RETRY_CNT; i++)
+    {
+        WriteBuffer[0] = Addr;
+        WriteBuffer[1] = Data;
+
+        TransactionInfo.Address = MAX8907B_RTC_SLAVE_ADDR;
+        TransactionInfo.Buf = &WriteBuffer[0];
+        TransactionInfo.Flags = NVODM_I2C_IS_WRITE;
+        TransactionInfo.NumBytes = 2;
+
+        status = NvOdmI2cTransaction(hPmu->hOdmI2C, &TransactionInfo, 1,
+            MAX8907B_I2C_SPEED_KHZ, NV_WAIT_INFINITE);
+
+        if (status == NvOdmI2cStatus_Success)
+            return NV_TRUE;
+    }
+
+    // Transaction Error
+    switch (status)
+    {
+        case NvOdmI2cStatus_Timeout:
+            NVODMPMU_PRINTF(("Max8907bRtcI2cWrite8 Failed: Timeout\n"));
+            break;
+        case NvOdmI2cStatus_SlaveNotFound:
+        default:
+            NVODMPMU_PRINTF(("Max8907bRtcI2cWrite8 Failed: SlaveNotFound\n"));
+            break;
+    }
+    return NV_FALSE;
+}
+
+NvBool Max8907bRtcI2cRead8(
+   NvOdmPmuDeviceHandle hDevice,
+   NvU8 Addr,
+   NvU8 *Data)
+{
+    NvU32 i;
+    NvU8 ReadBuffer[4];
+    NvOdmI2cStatus  status = NvOdmI2cStatus_Success;
+    Max8907bPrivData *hPmu = (Max8907bPrivData*)hDevice->pPrivate;
+    NvOdmI2cTransactionInfo TransactionInfo[MAX_TRANSACTION_COUNT];
+
+    NVODMPMU_PRINTF(("\n RTC I2C read: Addr=0x%x ", Addr));
+
+    for (i = 0; i < MAX8907B_I2C_RETRY_CNT; i++)
+    {
+        NvU32 TransactionCount = 0;
+        ReadBuffer[0] = Addr;
+        TransactionInfo[TransactionCount].Address = MAX8907B_RTC_SLAVE_ADDR;
+        TransactionInfo[TransactionCount].Buf = &ReadBuffer[0];
+        TransactionInfo[TransactionCount].Flags =
+            NVODM_I2C_IS_WRITE | NVODM_I2C_USE_REPEATED_START;
+        TransactionInfo[TransactionCount++].NumBytes = 1;
+
+        if (TransactionCount >= MAX_TRANSACTION_COUNT)
+            return NV_FALSE;
+        TransactionInfo[TransactionCount].Address =
+            (MAX8907B_RTC_SLAVE_ADDR | 0x1);
+        TransactionInfo[TransactionCount].Buf = &ReadBuffer[0];
+        TransactionInfo[TransactionCount].Flags = 0;
+        TransactionInfo[TransactionCount++].NumBytes = 1;
+
+        status = NvOdmI2cTransaction(hPmu->hOdmI2C, &TransactionInfo[0],
+            TransactionCount, MAX8907B_I2C_SPEED_KHZ, NV_WAIT_INFINITE);
+        if (status == NvOdmI2cStatus_Success)
+        {
+            *Data = ReadBuffer[0];
+            return NV_TRUE;
+        }
+    }
+
+    // Transaction Error
+    switch (status)
+    {
+        case NvOdmI2cStatus_Timeout:
+            NVODMPMU_PRINTF(("Max8907bRtcI2cRead8 Failed: Timeout\n"));
+            break;
+        case NvOdmI2cStatus_SlaveNotFound:
+        default:
+            NVODMPMU_PRINTF(("Max8907bRtcI2cRead8 Failed: SlaveNotFound\n"));
+            break;
+    }
+    return NV_FALSE;
+}

@@ -353,7 +353,7 @@ static void tegra_setup_warmboot(bool lp0_ok)
 		 * bootrom into performing a regular boot, but pass a flag to the
 		 * bootloader to bypass the kernel reload and jump to the lp0
 		 * restore sequence */
-		if (tegra_is_ap20_a03())
+		if (tegra_is_ap20_a03() && (!tegra_is_ap20_a03p()))
 			scratch0 |= (1<<5);
 		else
 			scratch0 |= 1;
@@ -522,6 +522,7 @@ static void tegra_suspend_finish(void)
 	NvOdmSocPowerState state = NvRmPowerLowestStateGet();
 
 	NvRmPrivPmuLPxStateConfig(s_hRmGlobal, state, NV_FALSE);
+	NvRmPrivDfsResume();
 #endif
 }
 
@@ -762,7 +763,7 @@ void __init tegra_init_suspend(struct tegra_suspend_platform_data *plat)
 
 	/* Always enable CPU power request; just normal polarity is supported */
 	reg = readl(pmc + PMC_CTRL);
-	BUG_ON(reg & TEGRA_POWER_CPU_PWRREQ_POLARITY);
+	BUG_ON(reg & (TEGRA_POWER_CPU_PWRREQ_POLARITY << TEGRA_POWER_PMC_SHIFT));
 	reg |= (TEGRA_POWER_CPU_PWRREQ_OE << TEGRA_POWER_PMC_SHIFT);
 	pmc_32kwritel(reg, PMC_CTRL);
 
@@ -801,6 +802,12 @@ void __init tegra_init_suspend(struct tegra_suspend_platform_data *plat)
 #ifdef CONFIG_PM
 void tegra_configure_dpd_kbc(unsigned int kbc_rows, unsigned int kbc_cols)
 {
-	writel((kbc_rows & 0xFFFF), pmc + PMC_DPAD_ORIDE);
+        unsigned long dpd_oride;
+
+	/* Only need to configure the enabled rows */
+	dpd_oride = readl(pmc + PMC_DPAD_ORIDE);
+	dpd_oride &= 0x00300000;
+	dpd_oride |= (kbc_rows & 0xFFFF);
+	writel(dpd_oride, pmc + PMC_DPAD_ORIDE);
 }
 #endif

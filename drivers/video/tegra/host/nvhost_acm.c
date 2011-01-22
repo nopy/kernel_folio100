@@ -26,7 +26,7 @@
 #include <linux/err.h>
 #include <linux/device.h>
 
-#define ACM_TIMEOUT 1*HZ
+#define ACM_TIMEOUT_MSEC 25
 
 void nvhost_module_busy(struct nvhost_module *mod)
 {
@@ -50,8 +50,7 @@ static void powerdown_handler(struct work_struct *work)
 	struct nvhost_module *mod;
 	mod = container_of(to_delayed_work(work), struct nvhost_module, powerdown);
 	mutex_lock(&mod->lock);
-	BUG_ON(!mod->powered);
-	if (atomic_read(&mod->refcount) == 0) {
+	if ((atomic_read(&mod->refcount) == 0) && mod->powered){
 		int i;
 		if (mod->func)
 			mod->func(mod, NVHOST_POWER_ACTION_OFF);
@@ -71,7 +70,8 @@ void nvhost_module_idle_mult(struct nvhost_module *mod, int refs)
 	mutex_lock(&mod->lock);
 	if (atomic_sub_return(refs, &mod->refcount) == 0) {
 		BUG_ON(!mod->powered);
-		schedule_delayed_work(&mod->powerdown, ACM_TIMEOUT);
+		schedule_delayed_work(
+			&mod->powerdown, msecs_to_jiffies(ACM_TIMEOUT_MSEC));
 		kick = true;
 	}
 	mutex_unlock(&mod->lock);
@@ -108,7 +108,9 @@ int nvhost_module_init(struct nvhost_module *mod, const char *name,
 				__func__, name);
 			break;
 		}
+		clk_enable(mod->clk[i]);
 		clk_set_rate(mod->clk[i], rate);
+		clk_disable(mod->clk[i]);
 		i++;
 	}
 

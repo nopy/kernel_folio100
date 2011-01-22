@@ -35,7 +35,6 @@
 #include "nvrm_power.h"
 #include "nvrm_hardware_access.h"
 #include "nvddk_usbphy.h"
-#include "../core/usb.h"
 
 #define TEGRA_USB_ID_INT_ENABLE			(1 << 0)
 #define TEGRA_USB_ID_INT_STATUS			(1 << 1)
@@ -178,6 +177,12 @@ static void tegra_ehci_restart (struct usb_hcd *hcd)
 	ehci->command |= CMD_RUN;
 	ehci_writel(ehci, ehci->command, &ehci->regs->command);
 
+	/* Enable the root Port Power */
+	if (HCS_PPC (ehci->hcs_params)) {
+		temp = ehci_readl(ehci, &ehci->regs->port_status[0]);
+		ehci_writel(ehci, temp | PORT_POWER, &ehci->regs->port_status[0]);
+	}
+
 	down_write(&ehci_cf_port_reset_rwsem);
 	hcd->state = HC_STATE_RUNNING;
 	/* unblock posted writes */
@@ -231,6 +236,15 @@ static void tegra_ehci_irq_work(struct work_struct* irq_work)
 					kick_rhub = true;
 				tegra_ehci_restart(hcd);
 			}
+		} else if (ehci->transceiver->state == OTG_STATE_A_SUSPEND) {
+			if (ehci->host_reinited) {
+				/* indicate hcd flags, that hardware is not accessible now */
+				clear_bit(HCD_FLAG_HW_ACCESSIBLE, &hcd->flags);
+				ehci_halt(ehci);
+				tegra_ehci_power_down(hcd);
+				ehci->transceiver->state = OTG_STATE_UNDEFINED;
+				ehci->host_reinited = 0;
+			}
 		}
 	} else
 #endif
@@ -249,11 +263,9 @@ static void tegra_ehci_irq_work(struct work_struct* irq_work)
 		}
 	}
 
-	if (kick_rhub && hcd->rh_registered) {
-		hcd->poll_rh = 0;
-		usb_set_device_state (hcd->self.root_hub, USB_STATE_ADDRESS);
-		hcd->state = HC_STATE_RUNNING;
-		usb_kick_khubd (hcd->self.root_hub);
+	if (kick_rhub) {
+		hcd->state = HC_STATE_SUSPENDED;
+		usb_hcd_resume_root_hub(hcd);
 	}
 }
 
@@ -279,6 +291,10 @@ static irqreturn_t tegra_ehci_irq (struct usb_hcd *hcd)
 			}
 		} else if (ehci->transceiver->state == OTG_STATE_A_SUSPEND) {
 			if (!ehci->host_reinited) {
+				spin_unlock (&ehci->lock);
+				return IRQ_HANDLED;
+			} else {
+				schedule_work(&ehci->irq_work);
 				spin_unlock (&ehci->lock);
 				return IRQ_HANDLED;
 			}
@@ -364,6 +380,9 @@ static int tegra_ehci_bus_suspend(struct usb_hcd *hcd)
 		if (ehci->transceiver->state != OTG_STATE_A_HOST) {
 			/* we are not in host mode, return */
 			return 0;
+		} else {
+			ehci->transceiver->state = OTG_STATE_A_SUSPEND;
+			ehci->host_reinited = 0;
 		}
 	}
 #endif

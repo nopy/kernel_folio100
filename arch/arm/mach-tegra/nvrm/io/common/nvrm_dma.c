@@ -61,13 +61,13 @@ static void dma_complete_work(struct work_struct *work)
 
 	spin_lock(&action->dma->lock);
 	list_del(&action->node);
-	spin_unlock(&action->dma->lock);
 
 	if (action->dma_sem) {
 		if (action->req.status==TEGRA_DMA_REQ_SUCCESS)
 			NvOsSemaphoreSignal(action->dma_sem);
 		NvOsSemaphoreDestroy(action->dma_sem);
 	}
+	spin_unlock(&action->dma->lock);
 	kfree(action);
 }
 
@@ -176,8 +176,8 @@ NvError NvRmDmaAllocate(NvRmDeviceHandle rm, NvRmDmaHandle *rm_dma,
 		mode = TEGRA_DMA_MODE_ONESHOT;
 
 	dma->ch = tegra_dma_allocate_channel(mode);
-	if (!dma->ch) {
-		e = NvError_Busy;
+	if (IS_ERR_OR_NULL(dma->ch)) {
+		e = NvError_DmaChannelNotAvailable;
 		goto fail;
 	}
 	INIT_LIST_HEAD(&dma->req_list);
@@ -188,7 +188,7 @@ NvError NvRmDmaAllocate(NvRmDeviceHandle rm, NvRmDmaHandle *rm_dma,
 	return NvSuccess;
 fail:
 	if (dma) {
-		if (dma->ch)
+		if (!IS_ERR_OR_NULL(dma->ch))
 			tegra_dma_free_channel(dma->ch);
 		kfree(dma);
 	}
@@ -236,7 +236,7 @@ NvError NvRmDmaStartDmaTransfer(NvRmDmaHandle dma, NvRmDmaClientBuffer *b,
 		return NvError_NotSupported;
 	}
 
-	action = kmalloc(sizeof(*action), GFP_KERNEL);
+	action = kzalloc(sizeof(*action), GFP_KERNEL);
 	if (!action) {
 		pr_debug("%s: insufficient memory\n", __func__);
 		return NvError_InsufficientMemory;
@@ -277,6 +277,7 @@ NvError NvRmDmaStartDmaTransfer(NvRmDmaHandle dma, NvRmDmaClientBuffer *b,
 		action->req.source_wrap = dst_wrap;
 	}
 
+	action->dma_sem = NULL;
 	if (timeout) {
 		action->dma_done = &dma_done;
 		action->req.complete = dma_complete_sync;
@@ -327,25 +328,31 @@ NvError NvRmDmaStartDmaTransfer(NvRmDmaHandle dma, NvRmDmaClientBuffer *b,
 	return e;
 }
 
+
 void NvRmDmaAbort(NvRmDmaHandle dma)
 {
 	if (!dma)
 		return;
 
+	tegra_dma_flush(dma->ch);
+
 	spin_lock(&dma->lock);
 	while (!list_empty(&dma->req_list)) {
 		struct dma_action *action;
-		struct tegra_dma_req *req;
 
 		action = list_first_entry(&dma->req_list,
 					  struct dma_action, node);
-		req = &action->req;
-		spin_unlock(&dma->lock);
-		tegra_dma_dequeue_req(dma->ch, req);
-		spin_lock(&dma->lock);
+
+		if (action->dma_sem)
+			NvOsSemaphoreDestroy(action->dma_sem);
+
+		list_del(&action->node);
+		kfree(action);
 	}
 	spin_unlock(&dma->lock);
 }
+
+
 
 NvError NvRmDmaGetCapabilities(NvRmDeviceHandle rm, NvRmDmaCapabilities *caps)
 {

@@ -182,6 +182,7 @@ static void action_ctxsave(struct nvhost_waitlist *waiter)
 	struct nvhost_channel *channel = hwctx->channel;
 
 	channel->ctxhandler.save_service(hwctx);
+	channel->ctxhandler.put(hwctx);
 }
 
 static void action_wakeup(struct nvhost_waitlist *waiter)
@@ -219,8 +220,9 @@ static void run_handlers(struct list_head completed[NVHOST_INTR_ACTION_COUNT])
 		list_for_each_entry_safe(waiter, next, head, list) {
 			list_del(&waiter->list);
 			handler(waiter);
-			atomic_set(&waiter->state, WLS_HANDLED);
-			smp_wmb();
+			if (atomic_cmpxchg(&waiter->state, WLS_REMOVED,
+						WLS_HANDLED) != WLS_REMOVED)
+				BUG();
 			kref_put(&waiter->refcount, waiter_release);
 		}
 	}
@@ -551,7 +553,20 @@ void nvhost_intr_stop(struct nvhost_intr *intr)
 	for (id = 0, syncpt = intr->syncpt;
 	     id < NV_HOST1X_SYNCPT_NB_PTS;
 	     ++id, ++syncpt) {
-		BUG_ON(!list_empty(&syncpt->wait_head));
+		struct nvhost_waitlist *waiter, *next;
+		list_for_each_entry_safe(waiter, next, &syncpt->wait_head, list) {
+			if (atomic_cmpxchg(&waiter->state, WLS_CANCELLED, WLS_HANDLED)
+				== WLS_CANCELLED) {
+				list_del(&waiter->list);
+				kref_put(&waiter->refcount, waiter_release);
+			}
+		}
+
+		if(!list_empty(&syncpt->wait_head)) {  // output diagnostics
+			printk("%s id=%d\n",__func__,id);
+			BUG_ON(1);
+		}
+
 		free_syncpt_irq(syncpt);
 	}
 

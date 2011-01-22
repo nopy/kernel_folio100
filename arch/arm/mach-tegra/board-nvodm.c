@@ -31,7 +31,17 @@
 #include <linux/gpio.h>
 #include <linux/console.h>
 #include <linux/reboot.h>
+#include <linux/delay.h>
+#include <linux/i2c.h>
 #include <linux/kobject.h>
+
+#ifdef CONFIG_TOUCHSCREEN_PANJIT_I2C
+#include <linux/i2c/panjit_ts.h>
+#endif
+
+#ifdef CONFIG_TOUCHSCREEN_ATMEL_MT_T9
+#include <linux/i2c/atmel_maxtouch.h>
+#endif
 
 #include <mach/iomap.h>
 #include <mach/io.h>
@@ -100,6 +110,9 @@ static enum udev_pm_level s_camera_usb_level=udev_level_auto;
 static int s_camera_usb_autosuspend=2;
 #endif
 
+NvBool IsBoardTango(void) {
+  return NV_FALSE;
+}
 NvRmGpioHandle s_hGpioGlobal;
 
 struct debug_port_data {
@@ -121,7 +134,9 @@ extern const struct tegra_pingroup_config *tegra_pinmux_get(const char *dev_id,
 
 static struct plat_serial8250_port debug_uart_platform[] = {
 	{
-		.flags = UPF_BOOT_AUTOCONF,
+		/* Force the debug console UART port type to PORT_TEGRA.*/
+		.flags = UPF_BOOT_AUTOCONF | UPF_FIXED_TYPE,
+		.type = PORT_TEGRA,
 		.iotype = UPIO_MEM,
 		.regshift = 2,
 	}, {
@@ -226,6 +241,7 @@ static void tegra_debug_port_resume(void)
 	tegra_pinmux_config_tristate_table(uart_debug_port.pinmux,
 				uart_debug_port.nr_pins, TEGRA_TRI_NORMAL);
 }
+
 
 #ifdef CONFIG_MMC_SDHCI_TEGRA
 extern struct tegra_nand_platform tegra_nand_plat;
@@ -383,6 +399,13 @@ static void __init tegra_setup_sdhci(void) {
 
 		plat->is_removable = prop->IsCardRemovable;
 		plat->is_always_on = prop->AlwaysON;
+
+#ifdef CONFIG_MACH_VENTANA
+		if (prop->usage == NvOdmQuerySdioSlotUsage_wlan)
+			plat->register_status_notify =
+				ventana_wifi_status_register;
+#endif
+
 		if (!gpio)
 			gpio_count = 0;
 		switch (gpio_count) {
@@ -526,6 +549,9 @@ static void __init tegra_setup_hsuart(void)
 		char name[16];
 
 		if (i==dbg_id)
+			continue;
+
+		if (odm_table[i] == 0)
 			continue;
 
 		plat = &tegra_uart_platform[i];
@@ -748,6 +774,7 @@ static noinline void __init tegra_setup_kbc(void)
 		pr_err("%s: out of memory for key mapping\n", __func__);
 		return;
 	}
+	pdata->wake_cnt = 0;
 	if (NvOdmKbcIsSelectKeysWkUpEnabled(&wake_row, &wake_col, &wake_num)) {
 		BUG_ON(!wake_num || wake_num>=KBC_MAX_KEY);
 		pdata->wake_cfg = kzalloc(sizeof(*pdata->wake_cfg)*wake_num,
@@ -768,8 +795,18 @@ static noinline void __init tegra_setup_kbc(void)
 	/* debounce time is reported from ODM in terms of clock ticks. */
 	pdata->debounce_cnt = temp;
 
+	/* Get the scanning timeout in terms of MilliSeconds.*/
+	temp = 0;
+	NvOdmKbcGetParameter(NvOdmKbcParameter_KeyScanTimeout, 1, &temp);
+	/* If value is 0 then set it to 5 second as default */
+	if (!temp)
+		temp = 5000;
+	/* Convert Milliseconds to clock count of 32Kz */
+	pdata->scan_timeout_cnt = temp*32;
+
 	/* repeat cycle is reported from ODM in milliseconds,
 	 * but needs to be specified in 32KHz ticks */
+	temp = 0;
 	NvOdmKbcGetParameter(NvOdmKbcParameter_RepeatCycleTime, 1, &temp);
 	pdata->repeat_cnt = temp * 32;
 
@@ -1166,6 +1203,82 @@ static struct platform_device tegra_touch_device = {
 };
 #endif
 
+#ifdef CONFIG_TOUCHSCREEN_PANJIT_I2C
+static struct panjit_i2c_ts_platform_data panjit_data = {
+	.gpio_reset = TEGRA_GPIO_PQ7,
+};
+
+static const struct i2c_board_info ventana_i2c_bus1_touch_info[] = {
+	{
+	 I2C_BOARD_INFO("panjit_touch", 0x3),
+	 .irq = TEGRA_GPIO_TO_IRQ(TEGRA_GPIO_PV6),
+	 .platform_data = &panjit_data,
+	 },
+};
+
+static int __init ventana_touch_init_panjit(void)
+{
+	tegra_gpio_enable(TEGRA_GPIO_PV6);	/* FIXME:  Ventana-specific GPIO assignment	*/
+	tegra_gpio_enable(TEGRA_GPIO_PQ7);	/* FIXME:  Ventana-specific GPIO assignment	*/
+	i2c_register_board_info(0, ventana_i2c_bus1_touch_info, 1);
+
+	return 0;
+}
+#endif
+
+#ifdef CONFIG_TOUCHSCREEN_ATMEL_MT_T9
+/* Atmel MaxTouch touchscreen              Driver data */
+/*-----------------------------------------------------*/
+/*
+ * Reads the CHANGELINE state; interrupt is valid if the changeline
+ * is low.
+ */
+static u8 read_chg()
+{
+	return gpio_get_value(TEGRA_GPIO_PV6);
+}
+
+static u8 valid_interrupt()
+{
+	return !read_chg();
+}
+
+static struct mxt_platform_data Atmel_mxt_info = {
+	/* Maximum number of simultaneous touches to report. */
+	.numtouch = 10,
+	// TODO: no need for any hw-specific things at init/exit?
+	.init_platform_hw = NULL,
+	.exit_platform_hw = NULL,
+	.max_x = 1366,
+	.max_y = 768,
+	.valid_interrupt = &valid_interrupt,
+	.read_chg = &read_chg,
+};
+
+static struct i2c_board_info __initdata i2c_info[] = {
+	{
+	 I2C_BOARD_INFO("maXTouch", MXT_I2C_ADDRESS),
+	 .irq = TEGRA_GPIO_TO_IRQ(TEGRA_GPIO_PV6),
+	 .platform_data = &Atmel_mxt_info,
+	 },
+};
+
+static int __init ventana_touch_init_atmel(void)
+{
+	tegra_gpio_enable(TEGRA_GPIO_PV6);	/* FIXME:  Ventana-specific GPIO assignment	*/
+	tegra_gpio_enable(TEGRA_GPIO_PQ7);	/* FIXME:  Ventana-specific GPIO assignment	*/
+
+	gpio_set_value(TEGRA_GPIO_PQ7, 0);
+	msleep(1);
+	gpio_set_value(TEGRA_GPIO_PQ7, 1);
+	msleep(100);
+
+	i2c_register_board_info(0, i2c_info, 1);
+
+	return 0;
+}
+#endif
+
 #ifdef CONFIG_INPUT_TEGRA_ODM_ACCEL
 static struct platform_device tegra_accelerometer_device = {
 	.name = "lsm303dlh_acc",
@@ -1177,13 +1290,6 @@ static struct platform_device tegra_accelerometer_device = {
 static struct platform_device tegra_scrollwheel_device = {
 	.name = "tegra_scrollwheel",
 	.id   = -1,
-};
-#endif
-
-#ifdef CONFIG_TEGRA_ODM_VIBRATE
-static struct platform_device tegra_vibrator_device = {
-	.name = "tegra_vibrator",
-	.id = -1,
 };
 #endif
 
@@ -1256,9 +1362,6 @@ static struct platform_device *nvodm_devices[] __initdata = {
 #endif
 #ifdef CONFIG_INPUT_TEGRA_ODM_ACCEL
 	&tegra_accelerometer_device,
-#endif
-#ifdef CONFIG_TEGRA_ODM_VIBRATE
-	&tegra_vibrator_device,
 #endif
 #ifdef CONFIG_INPUT_TEGRA_ODM_CAPSENSOR
 	&tegra_capsensor_device,
@@ -1387,6 +1490,38 @@ static void tegra_setup_spi(void) { }
 #endif
 
 #ifdef CONFIG_I2C_TEGRA
+#ifdef CONFIG_TEGRA_ODM_VENTANA
+static struct tegra_i2c_plat_parms tegra_i2c_platform[] = {
+	[0] = {
+		.adapter_nr = 0,
+		.bus_count = 1,
+		.bus_mux = { 0, 0 },
+		.bus_clk = { 100000, 0 }, /* default to 100KHz */
+		.is_dvc = false,
+	},
+	[1] = {
+		.adapter_nr = 1,
+		.bus_count = 2,
+		.bus_mux = { NvOdmI2cPinMap_Config1, NvOdmI2cPinMap_Config2},
+		.bus_clk = { 100000, 100000 },
+		.is_dvc = false,
+	},
+	[2] = {
+		.adapter_nr = 3,
+		.bus_count = 1,
+		.bus_mux = { 0, 0 },
+		.bus_clk = { 100000, 0 },
+		.is_dvc = false,
+	},
+	[3] = {
+		.adapter_nr = 4,
+		.bus_count = 1,
+		.bus_mux = { 0, 0 },
+		.bus_clk = { 100000, 0 },
+		.is_dvc = true,
+	},
+};
+#else
 static struct tegra_i2c_plat_parms tegra_i2c_platform[] = {
 	[0] = {
 		.adapter_nr = 0,
@@ -1417,6 +1552,7 @@ static struct tegra_i2c_plat_parms tegra_i2c_platform[] = {
 		.is_dvc = true,
 	},
 };
+#endif
 static struct platform_device tegra_i2c_devices[] = {
 	[0] = {
 		.name = "tegra_i2c",
@@ -1509,12 +1645,14 @@ static noinline void __init tegra_setup_i2c(void)
 		if (!mux)
 			continue;
 
+#ifndef CONFIG_TEGRA_ODM_VENTANA
 		if (mux == NVODM_QUERY_PINMAP_MULTIPLEXED) {
 			pr_err("%s: unable to register %s.%d (multiplexed)\n",
 			       __func__, dev->name, dev->id);
 			WARN_ON(1);
 			continue;
 		}
+#endif
 
 		if (clk)
 			plat->bus_clk[0] = clk*1000;
@@ -1613,14 +1751,14 @@ static void __init tegra_setup_suspend(void)
 		gpio_to_irq(TEGRA_GPIO_PU5), gpio_to_irq(TEGRA_GPIO_PU6),
 		gpio_to_irq(TEGRA_GPIO_PC7), gpio_to_irq(TEGRA_GPIO_PS2),
 		gpio_to_irq(TEGRA_GPIO_PAA1), gpio_to_irq(TEGRA_GPIO_PW3),
-		gpio_to_irq(TEGRA_GPIO_PW2), gpio_to_irq(TEGRA_GPIO_PY6),
+		/* FIXME: USB/SDMMC wake pad interrupt mapping may be wrong */
+		gpio_to_irq(TEGRA_GPIO_PW2), INT_SDMMC1,
 		gpio_to_irq(TEGRA_GPIO_PV6), gpio_to_irq(TEGRA_GPIO_PJ7),
 		INT_RTC, INT_KBC, INT_EXTERNAL_PMU,
-		/* FIXME: USB wake pad interrupt mapping may be wrong */
 		INT_USB, INT_USB3, INT_USB, INT_USB3,
 		gpio_to_irq(TEGRA_GPIO_PI5), gpio_to_irq(TEGRA_GPIO_PV2),
 		gpio_to_irq(TEGRA_GPIO_PS4), gpio_to_irq(TEGRA_GPIO_PS5),
-		gpio_to_irq(TEGRA_GPIO_PS0), gpio_to_irq(TEGRA_GPIO_PQ6),
+		INT_SDMMC2, gpio_to_irq(TEGRA_GPIO_PQ6),
 		gpio_to_irq(TEGRA_GPIO_PQ7), gpio_to_irq(TEGRA_GPIO_PN2),
 	};
 #endif
@@ -1725,6 +1863,10 @@ static void __init tegra_setup_reboot(void)
 
 static int __init tegra_setup_data(void)
 {
+	NvError e = NvSuccess;
+	if (!s_hRmGlobal)
+		e = NvRmOpenNew(&s_hRmGlobal);
+	BUG_ON(e!=NvSuccess);
 	platform_add_devices(nvodm_devices, ARRAY_SIZE(nvodm_devices));
 	return 0;
 }
@@ -2473,6 +2615,11 @@ ErrorExit:
 #endif
 void __init tegra_setup_nvodm(bool standard_i2c, bool standard_spi)
 {
+#if	defined(CONFIG_TOUCHSCREEN_PANJIT_I2C) && \
+	defined(CONFIG_TOUCHSCREEN_ATMEL_MT_T9)
+	NvOdmBoardInfo	BoardInfo;
+#endif
+
 	NvRmGpioOpen(s_hRmGlobal, &s_hGpioGlobal);
 	tegra_setup_debug_uart();
 	tegra_setup_hcd();
@@ -2492,6 +2639,31 @@ void __init tegra_setup_nvodm(bool standard_i2c, bool standard_spi)
 		tegra_setup_i2c();
 	if (standard_spi)
 		tegra_setup_spi();
+#if	defined(CONFIG_TOUCHSCREEN_PANJIT_I2C) && \
+	defined(CONFIG_TOUCHSCREEN_ATMEL_MT_T9)
+#define NVODM_ATMEL_TOUCHSCREEN    0x0A00
+#define NVODM_PANJIT_TOUCHSCREEN   0x0000
+#define BOARD_VENTANA              0x024B
+	if (NvOdmPeripheralGetBoardInfo(BOARD_VENTANA, &BoardInfo)) {
+		/* Diagnostics print messages to print Board SKU
+		   printk("\n\nRRC:  Board ID:  %04X\n\n", BoardInfo.SKU);
+		 */
+		switch (BoardInfo.SKU & 0xFF00) {
+		case NVODM_ATMEL_TOUCHSCREEN:
+			ventana_touch_init_atmel();
+			break;
+
+		default:
+			ventana_touch_init_panjit();
+			break;
+		}
+	} else
+		ventana_touch_init_panjit();
+#elif defined(CONFIG_TOUCHSCREEN_ATMEL_MT_T9)
+	ventana_touch_init_atmel();
+#elif defined(CONFIG_TOUCHSCREEN_PANJIT_I2C)
+	ventana_touch_init_panjit();
+#endif
 	tegra_setup_w1();
 	pm_power_off = tegra_system_power_off;
 	tegra_setup_suspend();

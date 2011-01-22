@@ -36,6 +36,7 @@
 	}                                                                    \
 	wait_for_completion(&comp);                                          \
 
+extern struct tegra_audio_state_t tegra_audio_state;
 
 static AlsaTransport* atrans = 0;
 
@@ -548,7 +549,22 @@ int tegra_audiofx_init(struct tegra_audio_data* tegra_snd_cx)
 		tegra_snd_cx->mi2s1 = tegra_snd_cx->xrt_fxn.MixerCreateObject(
 						tegra_snd_cx->mixer_handle,
 						NvAudioFxI2s1Id);
-		tegra_snd_cx->mi2s1_device_available = NvAudioFxIoDevice_Default;
+
+		tegra_snd_cx->i2s1_play_mix = tegra_snd_cx->xrt_fxn.MixerCreateObject(
+						tegra_snd_cx->mixer_handle,
+						NvAudioFxI2s1PlaybackMixId);
+
+		tegra_snd_cx->i2s2_play_mix = tegra_snd_cx->xrt_fxn.MixerCreateObject(
+						tegra_snd_cx->mixer_handle,
+						NvAudioFxI2s2PlaybackMixId);
+
+		tegra_snd_cx->i2s1_rec_split = tegra_snd_cx->xrt_fxn.MixerCreateObject(
+						tegra_snd_cx->mixer_handle,
+						NvAudioFxI2s1RecordSplitId);
+
+		tegra_snd_cx->i2s2_rec_split = tegra_snd_cx->xrt_fxn.MixerCreateObject(
+						tegra_snd_cx->mixer_handle,
+						NvAudioFxI2s2RecordSplitId);
 
 		memset(&message, 0, sizeof(NvAudioFxMessage));
 		message.Event = NvAudioFxEventControlChange;
@@ -673,8 +689,11 @@ static void tegra_audiofx_notifier_thread(void *arg)
 						NvAudioFxIoDeviceControlChangeMessage* iccm =
 							(NvAudioFxIoDeviceControlChangeMessage*)message;
 
-						audio_context->mi2s1_device_available = iccm->IoDevice;
-						tegra_audiofx_route(audio_context);
+						mutex_lock(&tegra_audio_state.mutex_lock);
+						tegra_audio_state.devices_available = iccm->IoDevice;
+						mutex_unlock(&tegra_audio_state.mutex_lock);
+						if (audio_context->device_id == I2S1)
+							tegra_audiofx_route(audio_context);
 					}
 
 				}
@@ -685,7 +704,8 @@ static void tegra_audiofx_notifier_thread(void *arg)
 							(NvAudioFxIoDeviceControlChangeMessage*)message;
 
 						audio_context->mspdif_device_available = iccm->IoDevice;
-						tegra_audiofx_route(audio_context);
+						if (audio_context->device_id == I2S1)
+							tegra_audiofx_route(audio_context);
 					}
 				}
 			}
@@ -713,16 +733,16 @@ NvError tegra_audiofx_route(struct tegra_audio_data *audio_context)
 		audio_context->spdif_plugin) {
 		spdif_device_select = NvAudioFxIoDevice_Aux;
 	}
-	else if(audio_context->mi2s1_device_available &
+	else if(tegra_audio_state.devices_available &
 		NvAudioFxIoDevice_HeadphoneOut) {
 		i2s1_device_select = NvAudioFxIoDevice_HeadphoneOut;
 	}
-	else if(audio_context->mi2s1_device_available &
+	else if(tegra_audio_state.devices_available &
 		NvAudioFxIoDevice_BuiltInSpeaker) {
 		i2s1_device_select = NvAudioFxIoDevice_BuiltInSpeaker;
 	}
 	else {
-		i2s1_device_select = audio_context->mi2s1_device_available;
+		i2s1_device_select = tegra_audio_state.devices_available;
 	}
 
 	e = audio_context->xrt_fxn.SetProperty(
@@ -872,7 +892,8 @@ void tegra_audiofx_destroyfx(struct tegra_audio_data *audio_context)
 
 NvError tegra_audiofx_create_output(NvRmDeviceHandle hRmDevice,
                              NvAudioFxMixerHandle hMixer,
-                             StandardPath* pPath)
+                             StandardPath* pPath,
+			     NvAudioFxObjectHandle hSource)
 {
 	NvError e = NvSuccess;
 	NvAudioFxConnectionDescriptor connection;
@@ -896,7 +917,7 @@ NvError tegra_audiofx_create_output(NvRmDeviceHandle hRmDevice,
 
 	connection.hSource = (NvAudioFxHandle)pPath->Volume;
 	connection.SourcePin = NvAudioFxSourcePin;
-	connection.hSink = 0;
+	connection.hSink = (NvAudioFxHandle)hSource;
 	connection.SinkPin = NvAudioFxSinkPin;
 	e = tegra_transport_set_property(pPath->Volume,
 	                             NvAudioFxProperty_Attach,
@@ -951,7 +972,8 @@ NvError tegra_audiofx_destroy_output(StandardPath* pPath)
 NvError tegra_audiofx_create_input(NvRmDeviceHandle hRmDevice,
                             NvAudioFxMixerHandle hMixer,
                             StandardPath* pInput,
-                            InputSelection InputSelect)
+                            InputSelection InputSelect,
+			    NvAudioFxObjectHandle hSource)
 {
 	NvError e = NvSuccess;
 	NvAudioFxConnectionDescriptor connection;
@@ -994,12 +1016,11 @@ NvError tegra_audiofx_create_input(NvRmDeviceHandle hRmDevice,
 	audiofx_path_connect(pInput->Src, pInput->Convert);
 
 	/* Wire 5 */
-	connection.hSource = 0;
 	connection.SourcePin = (InputSelect == NvAudioInputSelect_Record) ?
 				NvAudioFxSourcePin :  NvAudioFxLoopbackPin;
 	connection.hSink = (NvAudioFxHandle)pInput->Src;
 	connection.SinkPin = NvAudioFxSinkPin;
-	e = tegra_transport_set_property(0,
+	e = tegra_transport_set_property(hSource,
 	                             NvAudioFxProperty_Attach,
 	                             sizeof(NvAudioFxConnectionDescriptor),
 	                             &connection);

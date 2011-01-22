@@ -40,6 +40,7 @@
 #define KBC_INT_0	4
 #define KBC_ROW_CFG0_0	8
 #define KBC_COL_CFG0_0	0x18
+#define KBC_TO_CNT_0	0x24
 #define KBC_RPT_DLY_0	0x2c
 #define KBC_KP_ENT0_0	0x30
 #define KBC_KP_ENT1_0	0x34
@@ -78,13 +79,26 @@ static void tegra_kbc_setup_wakekeys(struct tegra_kbc *kbc, bool filter);
 static int tegra_kbc_suspend(struct platform_device *pdev, pm_message_t state)
 {
 	struct tegra_kbc *kbc = platform_get_drvdata(pdev);
+	unsigned long flags;
+	unsigned long val;
 
-	if (device_may_wakeup(&pdev->dev)) {
+	if (device_may_wakeup(&pdev->dev) && kbc->pdata->wake_cnt) {
+		spin_lock_irqsave(&kbc->lock, flags);
+		/* Disable the kbc to stop key scanning */
+		val = readl(kbc->mmio + KBC_CONTROL_0);
+		val &= ~1;
+		writel(val, kbc->mmio + KBC_CONTROL_0);
+
 		tegra_kbc_setup_wakekeys(kbc, true);
 		enable_irq_wake(kbc->irq);
 		tegra_configure_dpd_kbc(kbc->wake_enable_rows, kbc->wake_enable_cols);
 		/* Forcefully clear the interrupt status */
 		writel(0x7, kbc->mmio + KBC_INT_0);
+
+		/* Enable the kbc to wakeup from key event */
+		val |= 1;
+		writel(val, kbc->mmio + KBC_CONTROL_0);
+		spin_unlock_irqrestore(&kbc->lock, flags);
 		msleep(30);
 	} else {
 		tegra_kbc_close(kbc->idev);
@@ -97,7 +111,7 @@ static int tegra_kbc_resume(struct platform_device *pdev)
 {
 	struct tegra_kbc *kbc = platform_get_drvdata(pdev);
 
-	if (device_may_wakeup(&pdev->dev)) {
+	if (device_may_wakeup(&pdev->dev) && kbc->pdata->wake_cnt) {
 		disable_irq_wake(kbc->irq);
 		tegra_kbc_setup_wakekeys(kbc, false);
 		tegra_configure_dpd_kbc(0, 0);
@@ -293,6 +307,10 @@ static int tegra_kbc_open(struct input_dev *dev)
 	val |= 1<<3;  /* interrupt on FIFO threshold reached */
 	val |= 1;     /* enable */
 	writel(val, kbc->mmio + KBC_CONTROL_0);
+
+	/* Bit 19:0 is for scan timeout count */
+	kbc->pdata->scan_timeout_cnt &= 0xFFFFF;
+	writel(kbc->pdata->scan_timeout_cnt, kbc->mmio + KBC_TO_CNT_0);
 
 	/* atomically clear out any remaining entries in the key FIFO
 	 * and enable keyboard interrupts */
