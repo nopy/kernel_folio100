@@ -77,7 +77,10 @@ NvEcPrivInitHook( NvEcHandle hEc )
     req.RequestSubtype = ((NvEcRequestResponseSubtype) 
                           NvEcSleepSubtype_GlobalConfigureEventReporting);
     req.NumPayloadBytes = 1;
-    req.Payload[0] = NVEC_SLEEP_GLOBAL_REPORT_ENABLE_0_ACTION_ENABLE;
+//[B-Note: 431], Daniel 20100910 NVEC_SLEEP_GLOBAL_REPORT_ENABLE_0_ACTION_ENABLE;
+//nvodm battery driver will enable it.
+    //req.Payload[0] = NVEC_SLEEP_GLOBAL_REPORT_ENABLE_0_ACTION_ENABLE; 
+    req.Payload[0] = NVEC_SLEEP_GLOBAL_REPORT_ENABLE_0_ACTION_DISABLE; 
 
     NV_CHECK_ERROR( NvEcSendRequest(hEc, &req, &resp, sizeof(req), sizeof(resp)) );
     
@@ -154,6 +157,10 @@ NvEcPrivPowerSuspendHook(
             Subtype = ((NvEcRequestResponseSubtype) 
                           NvEcSleepSubtype_ApRestart);
             break;
+        case NvEcPowerState_Recovery:
+            Subtype = ((NvEcRequestResponseSubtype) 
+                          NvEcSleepSubtype_ApRecovery);
+            break;
         default:
             NV_ASSERT(!"NvEcPrivPowerSuspendHook: unknown power state\n");
             NV_CHECK_ERROR(NvError_BadValue);
@@ -172,9 +179,10 @@ NvEcPrivPowerSuspendHook(
     req.Payload[0] = NVEC_SLEEP_GLOBAL_REPORT_ENABLE_0_ACTION_DISABLE;
 
     NV_CHECK_ERROR( NvEcSendRequest(hEc, &req, &resp, sizeof(req), sizeof(resp)) );
-    
-    if ( resp.Status != NvEcStatus_Success )
+    if ( resp.Status != NvEcStatus_Success ) {
+NvOsDebugPrintf("ec_rs NvEcPrivPowerSuspendHook GLOBAL error Status = 0x%x\n", resp.Status);    
         return NvError_InvalidState;
+    }
     
     // instruct EC to go to sleep
 
@@ -186,9 +194,11 @@ NvEcPrivPowerSuspendHook(
     req.NumPayloadBytes = 0;
 
     NV_CHECK_ERROR( NvEcSendRequest(hEc, &req, &resp, sizeof(req), sizeof(resp)) );
-    
-    if ( resp.Status != NvEcStatus_Success )
+NvOsDebugPrintf("ec_rs NvEcPrivPowerSuspendHook Sleep Subtype = 0x%x\n", Subtype);    
+    if ( resp.Status != NvEcStatus_Success ) {
+NvOsDebugPrintf("ec_rs NvEcPrivPowerSuspendHook Sleep erroe Status = 0x%x\n", resp.Status);    
         return NvError_InvalidState;
+    }
 #endif // ENABLE_POWER_MODES
     
     DISP_MESSAGE(("NvEcPrivPowerSuspendHook: Exit success\n"));
@@ -217,7 +227,9 @@ NvEcPrivPowerResumeHook( NvEcHandle hEc )
     req.RequestSubtype = ((NvEcRequestResponseSubtype) 
                           NvEcSleepSubtype_GlobalConfigureEventReporting);
     req.NumPayloadBytes = 1;
-    req.Payload[0] = NVEC_SLEEP_GLOBAL_REPORT_ENABLE_0_ACTION_ENABLE;
+    //Daniel 20100918, it will be enabled in resume of battery driver.
+    //req.Payload[0] = NVEC_SLEEP_GLOBAL_REPORT_ENABLE_0_ACTION_ENABLE;
+    req.Payload[0] = NVEC_SLEEP_GLOBAL_REPORT_ENABLE_0_ACTION_DISABLE;
 
     NV_CHECK_ERROR( NvEcSendRequest(hEc, &req, &resp, sizeof(req), sizeof(resp)) );
     
@@ -229,7 +241,7 @@ NvEcPrivPowerResumeHook( NvEcHandle hEc )
 
     return NvSuccess;
 }
-
+#ifndef CONFIG_TEGRA_ODM_BETELGEUSE
 /*
  * Thread to send no-op commands to EC
  */
@@ -272,7 +284,7 @@ NvEcPrivPingThread(void *args)
 	ec->IsEcActive = NV_FALSE;
 	}
 }
-
+#endif
 NvError
 NvEcOpen(NvEcHandle *phEc,
          NvU32 InstanceId)
@@ -316,7 +328,7 @@ NvEcOpen(NvEcHandle *phEc,
     }
 
     // Set this flag as TRUE to indicate power is enabled
-    ec->powerState = NV_TRUE;
+    //Daniel 20100726, ec->powerState = NV_TRUE;
 
     // create private handle for internal communications between NvEc driver
     // and EC
@@ -332,15 +344,16 @@ NvEcOpen(NvEcHandle *phEc,
         ec->tagAllocated[0] = NV_TRUE;
         ec->hEc->ec = ec;
         ec->hEc->tag = 0;
-
+#ifndef CONFIG_TEGRA_ODM_BETELGEUSE
         NV_CHECK_ERROR_CLEANUP(NvOsSemaphoreCreate(&ec->hPingSema, 0));
-
+#endif
         // perform startup operations before mutex is unlocked
         NV_CHECK_ERROR_CLEANUP( NvEcPrivInitHook(ec->hEc) );
-
+#ifndef CONFIG_TEGRA_ODM_BETELGEUSE
         // start thread to send "pings" - no-op commands to keep EC "alive"
         NV_CHECK_ERROR_CLEANUP(NvOsThreadCreate(
             (NvOsThreadFunction)NvEcPrivPingThread, ec, &ec->hPingThread));
+#endif
     }
 
     hEc = NvOsAlloc( sizeof(NvEc) );
@@ -382,11 +395,13 @@ clean:
 fail:
     if (!s_refcount)
     {
+#ifndef CONFIG_TEGRA_ODM_BETELGEUSE
         ec->exitPingThread = NV_TRUE;
         if (ec->hPingSema)
             NvOsSemaphoreSignal( ec->hPingSema );
         NvOsThreadJoin( ec->hPingThread );
         NvOsSemaphoreDestroy(ec->hPingSema);
+#endif     
         ec->exitThread = NV_TRUE;
         if (ec->sema)
             NvOsSemaphoreSignal( ec->sema );
@@ -437,10 +452,11 @@ NvEcClose(NvEcHandle hEc)
                     NULL == ec->eventReg[hEc->tag].regEnd );
         NV_ASSERT( NULL == ec->requestBegin && NULL == ec->requestEnd );
         NV_ASSERT( NULL == ec->responseBegin && NULL == ec->responseEnd );
-
+#ifndef CONFIG_TEGRA_ODM_BETELGEUSE
         ec->exitPingThread = NV_TRUE;
         NvOsSemaphoreSignal( ec->hPingSema );
         NvOsThreadJoin( ec->hPingThread );
+#endif
         ec->exitThread = NV_TRUE;
         NvOsSemaphoreSignal( ec->sema );
         NvOsThreadJoin( ec->thread );
@@ -450,7 +466,9 @@ NvEcClose(NvEcHandle hEc)
         NvOsMutexDestroy( ec->responseMutex );
         NvOsMutexDestroy( ec->eventMutex );
         NvOsSemaphoreDestroy( ec->sema );
+#ifndef CONFIG_TEGRA_ODM_BETELGEUSE
         NvOsSemaphoreDestroy( ec->hPingSema );
+#endif
         NvOsSemaphoreDestroy( ec->LowPowerEntrySema );
         NvOsSemaphoreDestroy( ec->LowPowerExitSema );
         destroy = NV_TRUE;
@@ -460,7 +478,9 @@ NvEcClose(NvEcHandle hEc)
     }
 
     // Set this flag as FALSE to indicate power is disabled
-    ec->powerState = NV_FALSE;
+    //Daniel 20100723, if we change power state to NV_FALSE, we won't be able to suspend/poweroff it.
+    //Is there any side effect ????? 
+    //ec->powerState = NV_FALSE;
 
     NV_ASSERT( hEc->tag < NVEC_MAX_REQUESTOR_TAG );
     ec->tagAllocated[hEc->tag] = NV_FALSE;      // to be recycled
@@ -711,9 +731,10 @@ NvEcPrivFindAndDequeueResponse( NvEcPrivState    *ec,
         DISP_MESSAGE(("\r\nec->timeout[NVEC_IDX_RESPONSE] is set to=%d",
             ec->timeout[NVEC_IDX_RESPONSE]));
     }
-
+#ifndef CONFIG_TEGRA_ODM_BETELGEUSE
     if (found == NV_FALSE)
         NvOsDebugPrintf("\r\n***NVEC:Received Spurious Response from EC.");
+#endif   
     NvOsMutexUnlock( ec->responseMutex );
 }
 
@@ -1077,7 +1098,7 @@ NvEcPrivThread( void * args )
             e = NvEcPrivProcessReceiveEvent( ec, e );
                 // return ignored.  Could be spurious event.
         }
-
+#ifndef CONFIG_TEGRA_ODM_BETELGEUSE
 	if ( tStatus & NVEC_TRANSPORT_STATUS_EVENT_PACKET_MAX_NACK ) {
 		// signal the ping thread to send a ping command since max
 		// number of nacks have been sent to the EC
@@ -1085,7 +1106,7 @@ NvEcPrivThread( void * args )
 			NvOsSemaphoreSignal(ec->hPingSema);
 		}
 	}
-
+#endif
         // send request whenever possible 
         if ( (ec->timeout[NVEC_IDX_REQUEST] == NV_WAIT_INFINITE) && 
              (ec->EnterLowPowerState == NV_FALSE) )
@@ -1519,7 +1540,7 @@ NvError NvEcPowerSuspend(
     NvEcPrivState   *ec = &g_ec;
 
     NvOsMutexLock(ec->mutex);
-    
+NvOsDebugPrintf("ec_rs NvEcPowerSuspend PowerState=0x%x, ec->powerState=0x%x\n", PowerState, ec->powerState);    
     // Call transport's power off only if it's in ON state
     if (ec->powerState == NV_TRUE)
     {
@@ -1550,8 +1571,9 @@ NvError NvEcPowerResume(void)
     // Call transport's power on if it's OFF state
     if (ec->powerState == NV_FALSE)
     {
+NvOsDebugPrintf("ec_rs NvEcPowerResume 1\n");
         NV_CHECK_ERROR_CLEANUP( NvEcTransportPowerResume(ec->transport) );
-
+NvOsDebugPrintf("ec_rs NvEcPowerResume 2\n");
         ec->powerState = NV_TRUE;
         ec->EnterLowPowerState = NV_FALSE;
         // Signal priv thread to get out of power suspend.
@@ -1563,5 +1585,15 @@ NvError NvEcPowerResume(void)
 fail:
     NvOsMutexUnlock(ec->mutex);
     return e;
+}
+
+//Daniel 20100726
+//If we control "powerState" in NvEcOpen() and NvEcClose(),
+//We can't control EC power state correctly in NvEcPowerResume() and NvEcPowerSuspend().
+void NvEcPowerStateInit(void)
+{
+    NvEcPrivState   *ec = &g_ec;
+    
+    ec->powerState = NV_TRUE;
 }
 

@@ -120,6 +120,17 @@ typedef enum
     // AP GPIO(T,2): VDDIO_HDMI, VDDIO_VGA (5V @ 500ma)
     Ext_TPS2051BPmuSupply_VDDIO_VID,
 
+#if defined(CONFIG_TEGRA_ODM_BETELGEUSE)
+    // AP GPIO(BB,4): SUSB_NV#
+    Ext_SWITCHPmuSupply_VSleep,
+
+    // AP GPIO(V,4): CAM_PWDN
+    Ext_SWITCHPmuSupply_CamPwdn,
+
+    // AP GPIO(A,7): WWAN_DISABLE#
+    Ext_SWITCHPmuSupply_WwanEn,
+
+#endif
     // AP GPIO(T,3): VDDIO_SD
     Ext_SWITCHPmuSupply_VDDIO_SD,
 

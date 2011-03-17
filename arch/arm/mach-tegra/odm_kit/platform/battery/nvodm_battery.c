@@ -108,13 +108,15 @@ NvOdmBatteryGpioInterruptHandler(void *args)
 
     if (pBattContext)
     {
-        pBattContext->BatteryEvent = NvOdmBatteryEventType_RemainingCapacityAlarm;
+    	//Daniel 20100716, dedicated numeric for battery low intr
+        //pBattContext->BatteryEvent = NvOdmBatteryEventType_RemainingCapacityAlarm;
+        pBattContext->BatteryEvent = NvOdmBatteryEventType_LowBatteryIntr;
 
         if (pBattContext->hClientBattEventSem)
             NvOdmOsSemaphoreSignal(pBattContext->hClientBattEventSem);
     }
 
-    NvRmGpioInterruptDone(pBattContext->GpioIntrHandle);
+    //NvRmGpioInterruptDone(pBattContext->GpioIntrHandle); //Daniel 20100903, we need only one interrupt only since we will shutdown system.
 }
 #endif
 
@@ -123,14 +125,16 @@ NvOdmBatteryGpioInterruptHandler(void *args)
  */
 static NvError NvOdmBatteryPrivEcGetFirmwareVersion(
                NvOdmBatteryDevice *pBattContext,
-               NvS32 *MajorVersion,
-               NvS32 *MinorVersion)
+               NvU32 *MajorVersion, //Daniel 20100823, put ec version to fs //NvS32 *MajorVersion,
+               NvU32 *MinorVersion  //Daniel 20100823, put ec version to fs //NvS32 *MinorVersion
+               )
 {
     NvEcControlGetFirmwareVersionResponsePayload FirmwareVersion;
     NvError      RetVal = NvSuccess;
     NvEcRequest  EcRequest = {0};
     NvEcResponse EcResponse = {0};
-    NvS32        Version = 0;
+    //Daniel 20100823, put ec version to fs //NvS32        Version = 0;
+    NvU32        Version = 0;
 
     EcRequest.PacketType = NvEcPacketType_Request;
     EcRequest.RequestType = NvEcRequestResponseType_Control;
@@ -153,7 +157,7 @@ static NvError NvOdmBatteryPrivEcGetFirmwareVersion(
               (FirmwareVersion.VersionMinor[1] << 8) |
               (FirmwareVersion.VersionMinor[0] << 0);
 
-    *MajorVersion = Version & 0xFF00;
+    *MajorVersion = Version;  //Daniel 20100823, put ec version to fs & 0xFF00; 
     *MinorVersion = Version & 0xFF;
     return NvSuccess;
 }
@@ -210,8 +214,11 @@ static void NvOdmBatteryEventHandler(void *args)
                 pBattContext->BatteryEvent |= NvOdmBatteryEventType_Disharging;
 
             ChargingState = BattEvent >> NVODM_BATTERY_REM_CAP_ALARM_SHIFT;
-            if (ChargingState == NVODM_BATTERY_REM_CAP_ALARM_IS_SET)
+            //Daniel 20100716, just update battery info 
+            if (ChargingState == NVODM_BATTERY_REM_CAP_ALARM_IS_SET) {
                 pBattContext->BatteryEvent |= NvOdmBatteryEventType_RemainingCapacityAlarm;
+            	//NvOsDebugPrintf("batt low capacity alarm.\r\n");
+            }
 
             /* Signal the Battery Client for arrival of the valid event */
             if ((pBattContext->hClientBattEventSem != 0) &&
@@ -1140,7 +1147,8 @@ NvBool NvOdmPrivBattGetBatteryVoltage(NvOdmBatteryDevice *pBattContext,
  * @return NV_TRUE on success.
  */
 NvBool NvOdmBatteryDeviceOpen(NvOdmBatteryDeviceHandle *hDevice,
-                              NvOdmOsSemaphoreHandle *hOdmSemaphore)
+                              NvOdmOsSemaphoreHandle *hOdmSemaphore,
+                              NvU32 *ec_version) //Daniel 20100823, put ec version to fs
 {
     NvOdmBatteryDevice *pBattContext = NULL;
     NvError NvStatus = NvError_Success;
@@ -1184,6 +1192,8 @@ NvBool NvOdmBatteryDeviceOpen(NvOdmBatteryDeviceHandle *hDevice,
     }
 
     pBattContext->ECVersion = MinorVersion;
+    //Daniel 20100823, put ec version to fs.
+    *ec_version = MajorVersion;
     NVODMBATTERY_PRINTF(("EC Firmware Version = 0x%x\n", MinorVersion));
 
     if (hOdmSemaphore != NULL && *hOdmSemaphore != NULL)
@@ -1206,9 +1216,12 @@ NvBool NvOdmBatteryDeviceOpen(NvOdmBatteryDeviceHandle *hDevice,
             goto Cleanup;
         }
 
-        if (pBattContext->ECVersion >= NVODM_BATTERY_EC_FIRMWARE_VER_R04)
+        //daniel, if (pBattContext->ECVersion >= NVODM_BATTERY_EC_FIRMWARE_VER_R04)
+        if(1)
         {
-#if NVODM_WAKEUP_FROM_BATTERY_EVENT
+//daniel 20100809, diable this wakeup source
+//#if NVODM_WAKEUP_FROM_BATTERY_EVENT
+#if 0
            /* Configure the Batter present event as a wakeup */
             EcRequest.PacketType = NvEcPacketType_Request;
             EcRequest.RequestType = NvEcRequestResponseType_Battery;
@@ -1231,7 +1244,9 @@ NvBool NvOdmBatteryDeviceOpen(NvOdmBatteryDeviceHandle *hDevice,
                 goto Cleanup;
 #endif
 
-#if NVODM_WAKEUP_FROM_AC_EVENT
+//daniel 20100809, diable this wakeup source
+//#if NVODM_WAKEUP_FROM_AC_EVENT
+#if 0
            /* Configure the AC present event  as a wakeup */
             EcRequest.PacketType = NvEcPacketType_Request;
             EcRequest.RequestType = NvEcRequestResponseType_System;
@@ -1331,7 +1346,8 @@ NvBool NvOdmBatteryDeviceOpen(NvOdmBatteryDeviceHandle *hDevice,
                            pBattContext->hRm,
                            pBattContext->hPin,
                            IntrHandler,
-                           NvRmGpioPinMode_InputInterruptAny,
+                           //NvRmGpioPinMode_InputInterruptAny,
+                           NvRmGpioPinMode_InputInterruptLow, //Daniel 20100903, active low interrupt
                            pBattContext,
                            &pBattContext->GpioIntrHandle,
                            0);
@@ -1340,11 +1356,11 @@ NvBool NvOdmBatteryDeviceOpen(NvOdmBatteryDeviceHandle *hDevice,
                     goto Cleanup;
                 }
 
-                NvStatus = NvRmGpioInterruptEnable(pBattContext->GpioIntrHandle);
-                if (NvStatus != NvError_Success)
-                {
-                    goto Cleanup;
-                }
+                //NvStatus = NvRmGpioInterruptEnable(pBattContext->GpioIntrHandle);
+                //if (NvStatus != NvError_Success)
+                //{
+                //    goto Cleanup;
+                //}
             }
         }
 #endif
@@ -1352,6 +1368,22 @@ NvBool NvOdmBatteryDeviceOpen(NvOdmBatteryDeviceHandle *hDevice,
 
     *hDevice = pBattContext;
     NVODMBATTERY_PRINTF(("[EXIT] NvOdmBatteryDeviceOpen.\n"));
+
+    //[B-Note: 431], Daniel 20100910 NVEC_SLEEP_GLOBAL_REPORT_ENABLE_0_ACTION_ENABLE; 
+    /* enable global event reporting */
+	EcRequest.PacketType = NvEcPacketType_Request;
+	EcRequest.RequestType = NvEcRequestResponseType_Sleep;
+	EcRequest.RequestSubtype = (NvEcRequestResponseSubtype)NvEcSleepSubtype_GlobalConfigureEventReporting;
+	EcRequest.NumPayloadBytes = 1;
+	EcRequest.Payload[0] = NVEC_SLEEP_GLOBAL_REPORT_ENABLE_0_ACTION_ENABLE;
+	NvStatus = NvEcSendRequest(pBattContext->hEc,
+		&EcRequest,
+		&EcResponse,
+		sizeof(EcRequest),
+		sizeof(EcResponse));
+	if (NvStatus != NvError_Success)
+		NvOsDebugPrintf("NVEC_SLEEP_GLOBAL_REPORT_ENABLE_0_ACTION_ENABLE in batt 0x%x \r\n", NvStatus);
+
     return NV_TRUE;
 
 Cleanup:
@@ -1454,7 +1486,8 @@ NvBool NvOdmBatteryGetAcLineStatus(
     pBattContext = (NvOdmBatteryDevice *)hDevice;
 
     /* For R01 EC Firware report AC is online as it has not support for this */
-    if (pBattContext->ECVersion == NVODM_BATTERY_EC_FIRMWARE_VER_R01)
+    //Daniel,  if (pBattContext->ECVersion == NVODM_BATTERY_EC_FIRMWARE_VER_R01)
+    if(0)
     {
         *pStatus = NvOdmBatteryAcLine_Online;
         return NV_TRUE;
@@ -1533,7 +1566,8 @@ NvBool NvOdmBatteryGetBatteryStatus(
     /*
      * For R01 firmware Battery support is not present.
      */
-    if (pBattContext->ECVersion == NVODM_BATTERY_EC_FIRMWARE_VER_R01)
+    //Daniel, if (pBattContext->ECVersion == NVODM_BATTERY_EC_FIRMWARE_VER_R01)
+    if(0)
     {
         *pStatus = NVODM_BATTERY_STATUS_UNKNOWN;
          NVODMBATTERY_PRINTF(("NvOdmBatteryGetBatteryStatus:EC Firmware R01"));
@@ -1879,4 +1913,47 @@ void NvOdmBatteryGetBatteryChemistry(
 
     NVODMBATTERY_PRINTF(("[EXIT] NvOdmBatteryGetBatteryChemistry.\n"));
 #endif /* end of NVEC_BATTERY_DISABLED */
+}
+
+void NvOdmBatteryDisableIntr(NvOdmBatteryDeviceHandle hDevice)
+{
+    NvOdmBatteryDevice *pBattContext = NULL;
+
+    pBattContext = (NvOdmBatteryDevice *)hDevice;
+    
+    NvRmGpioInterruptMask(pBattContext->GpioIntrHandle, NV_TRUE);
+}
+
+void NvOdmBatteryEnableIntr(NvOdmBatteryDeviceHandle hDevice)
+{
+    NvOdmBatteryDevice *pBattContext = NULL;
+
+    pBattContext = (NvOdmBatteryDevice *)hDevice;
+    
+    NvRmGpioInterruptMask(pBattContext->GpioIntrHandle, NV_FALSE);
+    //NvRmGpioInterruptEnable(pBattContext->GpioIntrHandle);
+}
+
+void NvOdmBatteryEnableEcEvevt(NvOdmBatteryDeviceHandle hDevice)
+{
+    NvOdmBatteryDevice *pBattContext = NULL;
+    NvError NvStatus = NvError_Success;
+    NvEcRequest  EcRequest = {0};
+    NvEcResponse EcResponse = {0};
+
+    pBattContext = (NvOdmBatteryDevice *)hDevice;
+    
+    /* enable global event reporting */
+	EcRequest.PacketType = NvEcPacketType_Request;
+	EcRequest.RequestType = NvEcRequestResponseType_Sleep;
+	EcRequest.RequestSubtype = (NvEcRequestResponseSubtype)NvEcSleepSubtype_GlobalConfigureEventReporting;
+	EcRequest.NumPayloadBytes = 1;
+	EcRequest.Payload[0] = NVEC_SLEEP_GLOBAL_REPORT_ENABLE_0_ACTION_ENABLE;
+	NvStatus = NvEcSendRequest(pBattContext->hEc,
+		&EcRequest,
+		&EcResponse,
+		sizeof(EcRequest),
+		sizeof(EcResponse));
+	if (NvStatus != NvError_Success)
+		NvOsDebugPrintf("NVEC_SLEEP_GLOBAL_REPORT_ENABLE_0_ACTION_ENABLE in batt 0x%x \r\n", NvStatus);
 }

@@ -149,7 +149,19 @@ typedef enum
 
     /// Specifies a group for Battery
     NvOdmGpioPinGroup_Battery,
+    
+    /// Specifies a group for Docking 
+    NvOdmGpioPinGroup_Docking,
+    
+    /// Specifies a group for Cap Sensor 
+    NvOdmGpioPinGroup_CapSensor,
+    
+    /// Specifies a group for Ecompass Sensor 
+    NvOdmGpioPinGroup_Ecompass,
 
+    /// Specifies a group for Gsensor
+    NvOdmGpioPinGroup_Gsensor,
+      
     /// Specifies the total number of pin groups.
     NvOdmGpioPinGroup_Num,
     NvOdmGpioPinGroup_Force32 = 0x7FFFFFFF,

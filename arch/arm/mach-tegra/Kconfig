@@ -194,6 +194,13 @@ config TEGRA_LP2POLICY_IGNORE_LC
 
 endchoice
 
+choice
+	prompt "Tegra USB HUB Interrupt"
+
+config TEGRA_ODM_USB_HUB_INTR
+	bool "Enable usb hub interrupt"
+endchoice
+
 if TEGRA_ODM_KIT
 source "arch/arm/mach-tegra/odm_kit/Kconfig"
 endif

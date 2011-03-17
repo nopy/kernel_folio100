@@ -23,6 +23,9 @@
 #include "nvodm_query_gpio.h"
 #include "nvrm_gpio.h"
 #include "nvec.h"
+#if defined(CONFIG_TEGRA_ODM_BETELGEUSE)
+#include <linux/kernel.h>
+#endif
 
 // Module debug: 0=disable, 1=enable
 #define NVODM_ENABLE_PRINTF      0
@@ -108,18 +111,27 @@ NvBool NvOdmKeyboardInit(void)
     NvStatus = NvEcSendRequest(s_NvEcHandle, &Request, &Response, sizeof(Request), sizeof(Response));
     if (NvStatus != NvError_Success)
     {
+#if defined(CONFIG_TEGRA_ODM_BETELGEUSE)
+        printk("%s failed to SendRequest Keyboard:Enable\n", __func__);
+#endif
         goto cleanup;
     }
 
     /* check if command passed */
     if (Response.Status != NvEcStatus_Success)
     {
+#if defined(CONFIG_TEGRA_ODM_BETELGEUSE)
+        printk("%s got failed response from SendRequest Keyboard:Enable\n", __func__);
+#endif
         goto cleanup;
     }
 
 #if WAKE_FROM_KEYBOARD
 	hOdm = NvOdmOsAlloc(sizeof(NvOdmKbdContext));
 	if (!hOdm) {
+#if defined(CONFIG_TEGRA_ODM_BETELGEUSE)
+                printk("%s failed to NvOdmOsAlloc NvOdmKbdContext\n", __func__);
+#endif
 		goto cleanup;
 	}
 
@@ -131,7 +143,11 @@ NvBool NvOdmKeyboardInit(void)
 		hOdm->GpioPinInfo->Port,
 		hOdm->GpioPinInfo->Pin,
 		&hOdm->hPin);
+NV_ASSERT(hOdm->hPin);
 	if (!hOdm->hPin) {
+#if defined(CONFIG_TEGRA_ODM_BETELGEUSE)
+                printk("%s failed to NvRmGpioAcuqirePinHandle\n", __func__);
+#endif
 		goto cleanup;
 	}
 
@@ -145,11 +161,17 @@ NvBool NvOdmKeyboardInit(void)
 		&hOdm->GpioIntrHandle,
 		DEBOUNCE_TIME_MS);
 	if (NvStatus != NvError_Success) {
+#if defined(CONFIG_TEGRA_ODM_BETELGEUSE)
+                printk("%s failed to NvRmGpioInterrupRegister\n", __func__);
+#endif
 		goto cleanup;
 	}
 
 	NvStatus = NvRmGpioInterruptEnable(hOdm->GpioIntrHandle);
 	if (NvStatus != NvError_Success) {
+#if defined(CONFIG_TEGRA_ODM_BETELGEUSE)
+                printk("%s failed to NvRmGpioInterruptEnable\n", __func__);
+#endif
 		goto cleanup;
 	}
 
@@ -168,10 +190,16 @@ NvBool NvOdmKeyboardInit(void)
 		sizeof(Request),
 		sizeof(Response));
 	if (NvStatus != NvError_Success) {
+#if defined(CONFIG_TEGRA_ODM_BETELGEUSE)
+                printk("%s failed to SendRequest Keyboard:ConfigureWake\n", __func__);
+#endif
 		goto cleanup;
         }
 
 	if (Response.Status != NvEcStatus_Success) {
+#if defined(CONFIG_TEGRA_ODM_BETELGEUSE)
+                printk("%s got failed response from SendRequest Keyboard:ConfigureWake\n", __func__);
+#endif
 		goto cleanup;
 	}
 
@@ -189,10 +217,16 @@ NvBool NvOdmKeyboardInit(void)
 		sizeof(Request),
 		sizeof(Response));
 	if (NvStatus != NvError_Success) {
+#if defined(CONFIG_TEGRA_ODM_BETELGEUSE)
+                printk("%s failed to SendRequest Keyboard:ConfigureWakeKeyReport\n", __func__);
+#endif
 		goto cleanup;
         }
 
 	if (Response.Status != NvEcStatus_Success) {
+#if defined(CONFIG_TEGRA_ODM_BETELGEUSE)
+                printk("%s got failed response from SendRequest Keyboard:ConfigureWakeKeyReport\n", __func__);
+#endif
 		goto cleanup;
 	}
 #endif
@@ -201,6 +235,9 @@ NvBool NvOdmKeyboardInit(void)
     s_hKbcKeyScanRecvSema = NvOdmOsSemaphoreCreate(0);
     if (!s_hKbcKeyScanRecvSema)
     {
+#if defined(CONFIG_TEGRA_ODM_BETELGEUSE)
+        printk("%s failed to NvOdmOsSemaphoreCreate\n", __func__);
+#endif
         goto cleanup;
     }
 
@@ -215,6 +252,9 @@ NvBool NvOdmKeyboardInit(void)
                     sizeof(NvEcEvent));
     if (NvStatus != NvError_Success)
     {
+#if defined(CONFIG_TEGRA_ODM_BETELGEUSE)
+        printk("%s failed to RegisterForEvents\n", __func__);
+#endif
         goto cleanup;
     }
 
@@ -223,11 +263,22 @@ NvBool NvOdmKeyboardInit(void)
 
 cleanup:
 #if WAKE_FROM_KEYBOARD
+#if defined(CONFIG_TEGRA_ODM_BETELGEUSE)
+  if (hOdm)
+  {
+    if (hOdm->GpioIntrHandle)
+    {
 	NvRmGpioInterruptUnregister(s_hGpioGlobal, s_hRmGlobal, hOdm->GpioIntrHandle);
 	hOdm->GpioIntrHandle = NULL;
+    }
+    if (hOdm->hPin)
+    {
 	NvRmGpioReleasePinHandles(s_hGpioGlobal, &hOdm->hPin, hOdm->PinCount);
+    }
 	NvOdmOsFree(hOdm);
 	hOdm = NULL;
+  }
+#endif //defined(CONFIG_TEGRA_ODM_BETELGEUSE)
 #endif
     (void)NvEcUnregisterForEvents(s_hEcEventRegistration);
     s_hEcEventRegistration = NULL;

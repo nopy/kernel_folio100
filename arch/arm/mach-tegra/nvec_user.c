@@ -31,8 +31,14 @@
 #include "nvassert.h"
 #include "nvec_device.h"
 
+//Daniel 20100820, add NvEcPowerState_Restart for Restart, ECI section 6.4. Sleep State Control.
+static unsigned int reboot_flag = 0;
+
 static NvRtHandle s_RtHandle = NULL;
 int device_count = 0;
+
+//Daniel 20100726, change EC power state to true.
+void NvEcPowerStateInit(void);
 
 #define dev_to_nvec_driver(d)	container_of(d, struct nvec_driver, driver)
 #define to_nvec_device(x) container_of((x), struct nvec_device, dev)
@@ -247,9 +253,26 @@ static int nvec_bus_resume(struct device *_dev)
 	return 0;
 }
 
+//Daniel 20100820, add NvEcPowerState_Restart for Restart, ECI section 6.4. Sleep State Control.
+//type=0, power down
+//type=1, reboot
+//type=2, reboot to OTA (recovery) mode
+void nvec_set_reboot_flag(unsigned int type)
+{
+	reboot_flag = type;
+}
+
 static void nvec_bus_shutdown(struct device *pdev)
 {
+//Daniel 20100820, add NvEcPowerState_Restart for Restart, ECI section 6.4. Sleep State Control.
+//relative feature is "reboot".
+    if(reboot_flag == 1)
+        NvEcPowerSuspend(NvEcPowerState_Restart);
+    else if(reboot_flag == 2)
+        NvEcPowerSuspend(NvEcPowerState_Recovery);
+    else
     NvEcPowerSuspend(NvEcPowerState_PowerDown);
+    reboot_flag = 0;
 }
 
 static struct bus_type nvec_bus_type = {
@@ -311,8 +334,9 @@ static int __init nvec_init(void)
 {
 	int err = 0;
 	NvError status = NvSuccess;
-	NvU32 NumTypes = 1; // TODO: must have NvRtObjType_NvEc_Num instead;
-
+	//Daniel 20100621 fix the kernel panic when issuing nvec cmd
+//	NvU32 NumTypes = 1; // TODO: must have NvRtObjType_NvEc_Num instead;
+	NvU32 NumTypes = 2; // TODO: must have NvRtObjType_NvEc_Num instead;
 	err = device_register(&nvec_bus_dev);
 	if (err)
 		return err;
@@ -342,6 +366,8 @@ static int __init nvec_init(void)
 		device_unregister(&nvec_bus_dev);
 		return -EINVAL;
 	}
+	//Daniel 20100726, change EC power state to true.
+	NvEcPowerStateInit(); 
 
 	err = misc_register(&nvec_dev);
 	if (err < 0) {

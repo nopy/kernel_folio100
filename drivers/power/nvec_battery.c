@@ -32,11 +32,19 @@
 #include <linux/power_supply.h>
 #include <linux/wakelock.h>
 #include <linux/reboot.h>
+#include <linux/delay.h>
 
 #include "nvcommon.h"
 #include "nvos.h"
 #include "nvodm_battery.h"
 #include "nvec_device.h"
+//Daniel 20100903, if (batt<=5%) and batt discharging, lock suspend.
+#include <linux/wakelock.h>
+static struct wake_lock mylock;
+static NvBool mylock_flag = NV_FALSE;
+//Daniel 20100918, if (batt<=4%) and send batt=0% to trigger shutdown or just call kernel_power_off();.
+//call while each battery polling
+static NvU32 low_batt_cnt = 0;
 
 
 /* This defines the manufacturer name and model name length */
@@ -134,6 +142,7 @@ struct tegra_battery_dev {
 	NvU32	batt_status_poll_period;
 	NvBool	present;
 	NvBool	exitThread;
+	NvU32	ec_version; //Daniel 20100923, put ec version to fs
 };
 
 static struct tegra_battery_dev *batt_dev;
@@ -167,6 +176,30 @@ static struct device_attribute tegra_battery_attr = {
 	.store = tegra_battery_store_property,
 };
 
+static ssize_t tegra_battery_show_version(
+		struct device *dev,
+		struct device_attribute *attr,
+		char *buf)
+{
+	return sprintf(buf, "%X\n", batt_dev->ec_version);
+}
+
+static ssize_t tegra_battery_store_version(
+		struct device *dev,
+		struct device_attribute *attr,
+		const char *buf,
+		size_t count)
+{
+	return count;
+}
+
+static struct device_attribute tegra_battery_version = {
+	.attr = { .name = "ec_version", .mode = S_IRUGO,
+			  .owner = THIS_MODULE },
+	.show = tegra_battery_show_version,
+	.store = tegra_battery_store_version,
+};
+
 void NvBatteryEventHandlerThread(void *args)
 {
 	NvU8	BatteryState = 0, BatteryEvent = 0;
@@ -185,18 +218,21 @@ void NvBatteryEventHandlerThread(void *args)
 			&BatteryState);
 
 		NvOdmBatteryGetEvent(batt_dev->hOdmBattDev, &BatteryEvent);
-
+NvOsDebugPrintf("ec_rs BatteryEvent = 0x%x\n", BatteryEvent);
 		if ((BatteryState == NVODM_BATTERY_STATUS_UNKNOWN) ||
 			(BatteryEvent == NvOdmBatteryEventType_Num)) {
 			/* Do nothing */
 		} else {
-			if (BatteryEvent & NvOdmBatteryEventType_RemainingCapacityAlarm) {
-				if (BatteryState == (NVODM_BATTERY_STATUS_CRITICAL |
-					NVODM_BATTERY_STATUS_VERY_CRITICAL |
-					NVODM_BATTERY_STATUS_DISCHARGING)) {
-					pr_info("nvec_battery:calling kernel_power_off...\n");
-					kernel_power_off();
-				}
+			//if (BatteryEvent & NvOdmBatteryEventType_RemainingCapacityAlarm) {
+			if (BatteryEvent & NvOdmBatteryEventType_LowBatteryIntr) {
+				//Daniel 20100701, just force off while receive LOW_BAT# interrupt(not low capacity alarm).
+				//if (BatteryState == (NVODM_BATTERY_STATUS_CRITICAL |
+				//	NVODM_BATTERY_STATUS_VERY_CRITICAL |
+				//	NVODM_BATTERY_STATUS_DISCHARGING)) {
+				//	pr_info("nvec_battery:calling kernel_power_off...\n");
+NvOsDebugPrintf("ec_rs batt low battery interrupt.\r\n");
+				//	kernel_power_off();
+				//}
 			} else {
 				/* Update the battery and power supply info for other events */
 				power_supply_changed(&tegra_power_supplies[NvPowerSupply_TypeBattery]);
@@ -373,6 +409,35 @@ static int tegra_battery_get_property(struct power_supply *psy,
 				if (batt_dev->percent_remain == 100) {
 					val->intval = POWER_SUPPLY_STATUS_FULL;
 				}
+				//Daniel 20100903, if (batt<=5%) and batt present and discharging, lock suspend.
+				if((batt_dev->percent_remain <= 5) && (val->intval == POWER_SUPPLY_STATUS_DISCHARGING)) {
+					if(mylock_flag == NV_FALSE) {
+						wake_lock(&mylock);
+						mylock_flag = NV_TRUE;
+						NvOsDebugPrintf("ec_rs batt 5% wake_lock\n");
+					}
+					//Daniel 20100918, if (batt<=4%) and send batt=0% to trigger shutdown or just call kernel_power_off();.
+					if(batt_dev->percent_remain <= 4) {
+						NvOsDebugPrintf("ec_rs low_batt_cnt = %d\n", low_batt_cnt);
+						batt_dev->percent_remain = 0; //to trigger APP shutdown procedure (workaround, app 5% shutdown isn't ready).
+						low_batt_cnt++;
+						if(low_batt_cnt > 8) {
+							//do it on next battery polling
+							NvOsDebugPrintf("ec_rs kernel_power_off.\r\n");
+							msleep(500);
+							kernel_power_off();
+						}
+					}
+					else
+						low_batt_cnt = 0;
+				}
+				else if(((batt_dev->percent_remain > 5) || (val->intval != POWER_SUPPLY_STATUS_DISCHARGING))) {
+					if(mylock_flag == NV_TRUE) {
+						wake_unlock(&mylock);
+						mylock_flag = NV_FALSE;
+						NvOsDebugPrintf("ec_rs batt 5% wake_unlock\n");
+					}
+				}
 			}
 		}
 		break;
@@ -445,7 +510,10 @@ static int tegra_battery_get_property(struct power_supply *psy,
 
 	case POWER_SUPPLY_PROP_TEMP:
 		/* returned value is degrees C * 10 */
-		val->intval = batt_dev->temp/10;
+		//Daniel 20100706, its unit is 0.1 degree-K, not 0.01 degree-C.
+		//Daniel 20100707, convert from tenths of a degree-K to tenths of a degree-C.
+		//val->intval = batt_dev->temp/10;
+		val->intval = batt_dev->temp - 2730;
 		break;
 
 	case POWER_SUPPLY_PROP_MODEL_NAME:
@@ -508,7 +576,8 @@ static int nvec_battery_probe(struct nvec_device *pdev)
 	}
 
 	result = NvOdmBatteryDeviceOpen(&(batt_dev->hOdmBattDev),
-		(NvOdmOsSemaphoreHandle *)&batt_dev->hOdmSemaphore);
+		(NvOdmOsSemaphoreHandle *)&batt_dev->hOdmSemaphore,
+		&(batt_dev->ec_version)); //Daniel 20100823, put ec version to fs.
 	if (!result || !batt_dev->hOdmBattDev) {
 		pr_err("NvOdmBatteryDeviceOpen FAILED\n");
 		goto Cleanup;
@@ -525,6 +594,7 @@ static int nvec_battery_probe(struct nvec_device *pdev)
 		jiffies + msecs_to_jiffies(batt_dev->batt_status_poll_period));
 
 	rc = device_create_file(&pdev->dev, &tegra_battery_attr);
+	rc = device_create_file(&pdev->dev, &tegra_battery_version); //Daniel 20100823, put ec version to fs
 	if (rc) {
 		for (i = 0; i < ARRAY_SIZE(tegra_power_supplies); i++) {
 			power_supply_unregister(&tegra_power_supplies[i]);
@@ -578,6 +648,7 @@ static void nvec_battery_remove(struct nvec_device *pdev)
 
 		if (batt_dev->hOdmBattDev) {
 			device_remove_file(&pdev->dev, &tegra_battery_attr);
+			device_remove_file(&pdev->dev, &tegra_battery_version);  //Daniel 20100823, put ec version to fs
 
 			del_timer_sync(&(batt_dev->battery_poll_timer));
 
@@ -598,6 +669,7 @@ static void nvec_battery_remove(struct nvec_device *pdev)
 static int nvec_battery_suspend(struct nvec_device *dev,
 	pm_message_t state)
 {
+	NvOdmBatteryDisableIntr(batt_dev->hOdmBattDev);
 	/* Kill the Battery Polling timer */
 	del_timer_sync(&batt_dev->battery_poll_timer);
 	return 0;
@@ -607,8 +679,14 @@ static int nvec_battery_resume(struct nvec_device *dev)
 {
 	/*Create Battery Polling timer */
 	setup_timer(&batt_dev->battery_poll_timer, tegra_battery_poll_timer_func, 0);
+//[B-Note:1614-481] Daniel 20100914, After resume, BSP changes the first polling time value from 30 sec to 3 sec. 
+//	mod_timer(&batt_dev->battery_poll_timer,
+//		jiffies + msecs_to_jiffies(batt_dev->batt_status_poll_period));
 	mod_timer(&batt_dev->battery_poll_timer,
-		jiffies + msecs_to_jiffies(batt_dev->batt_status_poll_period));
+		jiffies + msecs_to_jiffies(3000));
+//	NvOdmBatteryEnableIntr(batt_dev->hOdmBattDev);
+    //Daniel 20100918, it will be enabled in resume of battery driver.
+	NvOdmBatteryEnableEcEvevt(batt_dev->hOdmBattDev);
 	return 0;
 }
 
@@ -644,11 +722,15 @@ static int __init nvec_battery_init(void)
 		return err;
 	}
 
+	//Daniel 20100903, if (batt<=5%) and batt discharging, lock suspend.
+	wake_lock_init(&mylock, WAKE_LOCK_SUSPEND, "NvBattSuspendLock");
+
 	return 0;
 }
 
 static void __exit nvec_battery_exit(void)
 {
+	wake_lock_destroy(&mylock);
 	nvec_unregister_device(&nvec_battery_device);
 	nvec_unregister_driver(&nvec_battery_driver);
 }

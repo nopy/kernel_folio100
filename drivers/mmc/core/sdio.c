@@ -147,8 +147,15 @@ static int sdio_enable_wide(struct mmc_card *card)
 	int ret;
 	u8 ctrl;
 
+#if 0
+	unsigned int width = MMC_BUS_WIDTH_4;
+
+	if (!(card->host->caps & (MMC_CAP_4_BIT_DATA | MMC_CAP_8_BIT_DATA)))
+		return 0;
+#else
 	if (!(card->host->caps & MMC_CAP_4_BIT_DATA))
 		return 0;
+#endif
 
 	if (card->cccr.low_speed && !card->cccr.wide_bus)
 		return 0;
@@ -157,13 +164,27 @@ static int sdio_enable_wide(struct mmc_card *card)
 	if (ret)
 		return ret;
 
+#if 0
+	if (card->host->caps & MMC_CAP_8_BIT_DATA) {
+		width = MMC_BUS_WIDTH_8;
+		ctrl |= SDIO_BUS_WIDTH_8BIT;
+	} else {
+		width = MMC_BUS_WIDTH_4;
+		ctrl |= SDIO_BUS_WIDTH_4BIT;
+	}
+#else
 	ctrl |= SDIO_BUS_WIDTH_4BIT;
+#endif
 
 	ret = mmc_io_rw_direct(card, 1, 0, SDIO_CCCR_IF, ctrl, NULL);
 	if (ret)
 		return ret;
 
+#if 0
+	mmc_set_bus_width(card->host, width);
+#else
 	mmc_set_bus_width(card->host, MMC_BUS_WIDTH_4);
+#endif
 
 	return 0;
 }
@@ -437,6 +458,12 @@ static int mmc_sdio_suspend(struct mmc_host *host)
 				break;
 		}
 	}
+#if 0 /*ATHENV */
+	if (err == -EBUSY) {
+		host->suspend_keep_power = 1;
+		return err;
+	}
+#endif /* ATHENV */
 	while (err && --i >= 0) {
 		struct sdio_func *func = host->card->sdio_func[i];
 		if (func && sdio_func_present(func) && func->dev.driver) {
@@ -448,6 +475,11 @@ static int mmc_sdio_suspend(struct mmc_host *host)
 	return err;
 }
 
+/* ATHENV */
+//unsigned int ath_bt_en = 0;
+//EXPORT_SYMBOL(ath_bt_en);
+extern void ATHSetPowerOn(int IsEnable);
+/* ATHENV */
 static int mmc_sdio_resume(struct mmc_host *host)
 {
 	int i, err;
@@ -456,9 +488,24 @@ static int mmc_sdio_resume(struct mmc_host *host)
 	BUG_ON(!host->card);
 
 	/* Basic card reinitialization. */
+#if 0
+	if (!host->suspend_keep_power) {
+		mmc_claim_host(host);
+		err = mmc_sdio_init_card(host, host->ocr, host->card);
+		mmc_release_host(host);
+	} else {
+		err = 0;
+		host->suspend_keep_power = 0;
+	}
+
+#else
+/* ATHENV */
+		ATHSetPowerOn(1);
+/* ATHENV */
 	mmc_claim_host(host);
 	err = mmc_sdio_init_card(host, host->ocr, host->card);
 	mmc_release_host(host);
+#endif
 
 	/*
 	 * If the card looked to be the same as before suspending, then

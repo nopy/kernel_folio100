@@ -34,3 +34,7 @@ obj-$(CONFIG_INPUT_WM831X_ON)		+= wm831x-on.o
 obj-$(CONFIG_INPUT_YEALINK)		+= yealink.o
 obj-$(CONFIG_INPUT_TEGRA_ODM_ACCEL)	+= tegra_odm_accel.o
 obj-$(CONFIG_INPUT_TEGRA_ODM_SCROLL)	+= tegra_odm_scroll.o
+obj-$(CONFIG_INPUT_TEGRA_ODM_EC_CIR)	+= tegra-nvec-cir.o
+obj-$(CONFIG_INPUT_TEGRA_ODM_ECOMPASS)	+= tegra_odm_ecompass.o
+obj-$(CONFIG_INPUT_TEGRA_ODM_DOCK)	+= tegra_odm_dock.o
+obj-$(CONFIG_INPUT_TEGRA_ODM_CAPSENSOR)	+= tegra_odm_capsensor.o

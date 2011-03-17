@@ -23,9 +23,15 @@ ifeq ($(CONFIG_TEGRA_ODM_VENTANA),y)
   is_panjit_touch := y
 endif
 
+ifeq ($(CONFIG_TEGRA_ODM_BETELGEUSE),y)
+  is_eeti_touch := y
+endif
+
 ccflags-$(is_tpk_touch) += -DNV_TOUCH_TPK
 ccflags-$(is_panjit_touch) += -DNV_TOUCH_PANJIT
+ccflags-$(is_eeti_touch) += -DNV_TOUCH_EETI
 
 obj-y			+= nvodm_touch.o
 obj-$(is_tpk_touch)	+= nvodm_touch_tpk.o
 obj-$(is_panjit_touch)	+= nvodm_touch_panjit.o
+obj-$(is_eeti_touch) 	+= nvodm_touch_eeti.o

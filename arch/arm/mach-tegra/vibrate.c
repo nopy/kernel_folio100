@@ -37,18 +37,50 @@
 #include "nvodm_query.h"
 #include "nvodm_vibrate.h"
 
+#define MIN_VIBRATION 30 /* ms */
+
 static NvOdmVibDeviceHandle s_hOdmVibrate = NULL;
 static int s_Timeout;
 
+static int __init boardtype_setup(char *options)
+{
+	if (!options || !*options)
+	{
+		printk("Get board type failed!\n");
+		options = "ER";
+	}	
+	
+	PegaVibModeInit(options);  /* init vibration mode */
+
+	return 0;
+}
+__setup("boardtype=", boardtype_setup);
+
 static void vibrator_enable(struct timed_output_dev *dev, int value)
 {
+	int mode;
+
 	s_Timeout = value;
+
 	if (!s_hOdmVibrate) {
 		NvOdmVibOpen(&s_hOdmVibrate);
 		if (!s_hOdmVibrate)
 			return;
 	}
-	if (value) {
+
+	if (value == 999999999 ) {  /* Continued vibration */
+		printk("Continued vibration, echo '0' to stop!\n");
+		NvOdmVibStart(s_hOdmVibrate);
+	}
+	else if (value == 888888888) {	 /* Change vibration mode */
+		mode = (PgeaVibModeGet()+1)%2;  /* change to */
+
+		printk("Change vibration mode to %s!\n", mode ? "ER":"PR");
+		PgeaVibModeSet(mode);
+		NvOdmVibStop(s_hOdmVibrate);
+	}
+	else if (value > 0) {
+		/* printk("Enable vibrator: %d ms\n", value); */
 		NvOdmVibStart(s_hOdmVibrate);
 		msleep(value);
 		NvOdmVibStop(s_hOdmVibrate);
@@ -72,6 +104,10 @@ static struct timed_output_dev tegra_vibrator = {
 static int __init init_tegra_vibrator(void)
 {
 	int status;
+
+	/* Add init information */
+	printk("\nvibrator init\n");
+
 	if(!s_hOdmVibrate)
 		NvOdmVibOpen(&s_hOdmVibrate);
 

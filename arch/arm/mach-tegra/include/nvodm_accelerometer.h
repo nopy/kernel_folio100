@@ -50,6 +50,20 @@ extern "C"
 #include "nvodm_services.h"
 #include "nvassert.h"
 
+#define LSM303DLH_ACCSENSOR_DATA_SIZE 3
+
+#define LSM303DLH_ACC_IOCTL_BASE 77
+/* The following define the IOCTL command values via the ioctl macros */
+#define LSM303DLH_ACC_IOCTL_SET_DELAY	_IOW(LSM303DLH_ACC_IOCTL_BASE, 0, int)
+#define LSM303DLH_ACC_IOCTL_GET_DELAY	_IOR(LSM303DLH_ACC_IOCTL_BASE, 1, int)
+#define LSM303DLH_ACC_IOCTL_SET_ENABLE	_IOW(LSM303DLH_ACC_IOCTL_BASE, 2, int)
+#define LSM303DLH_ACC_IOCTL_GET_ENABLE	_IOR(LSM303DLH_ACC_IOCTL_BASE, 3, int)
+#define LSM303DLH_ACC_IOCTL_SET_G_RANGE	_IOW(LSM303DLH_ACC_IOCTL_BASE, 4, int)
+#define LSM303DLH_ACC_IOCTL_SELF_TEST	_IOW(LSM303DLH_ACC_IOCTL_BASE, 7, int)
+#define LSM303DLH_ACC_IOCTL_GETDATA		_IOR(LSM303DLH_ACC_IOCTL_BASE, 8, NvS32[LSM303DLH_ACCSENSOR_DATA_SIZE])
+#define LSM303DLH_ACC_IOCTL_CALIBRATION	_IOW(LSM303DLH_ACC_IOCTL_BASE, 9, int)
+#define LSM303DLH_ACC_IOCTL_RESET_CALIBRATION	_IOW(LSM303DLH_ACC_IOCTL_BASE, 10, int)
+
 /**
  * @defgroup nvodm_accelerometer Accelerometer Adapation Interface
  *
@@ -406,6 +420,23 @@ NvOdmAccelSetSampleRate(NvOdmAccelHandle hDevice, NvU32 SampleRate);
 NvBool
 NvOdmAccelGetSampleRate(NvOdmAccelHandle hDevice, NvU32* pSampleRate);
 
+NvBool 
+lsm303dlh_acc_enable(NvOdmAccelHandle hDevice);
+
+NvBool 
+lsm303dlh_acc_disable(NvOdmAccelHandle hDevice);
+
+NvBool
+lsm303dlh_acc_self_test(NvOdmAccelHandle hDevice);
+
+NvBool
+lsm303dlh_acc_calibration(NvOdmAccelHandle hDevice, NvS32 interval);
+
+NvBool
+lsm303dlh_acc_calibration_write(NvOdmAccelHandle hDevice, NvS32 cal_x, NvS32 cal_y, NvS32 cal_z);
+
+NvBool
+lsm303dlh_acc_calibration_read(NvOdmAccelHandle hDevice);
 
 #if defined(__cplusplus)
 }

@@ -600,6 +600,21 @@ static int hci_dev_do_close(struct hci_dev *hdev)
 	return 0;
 }
 
+/// Abon [START] - Add : Clos hci0 before suspend (201009171700)
+int hci_dev_all_close(void)
+{
+	struct hci_dev *hdev;
+	int err;
+
+	if (!(hdev = hci_dev_get(0)))
+		return -ENODEV;
+	err = hci_dev_do_close(hdev);
+	hci_dev_put(hdev);
+	return err;
+}
+EXPORT_SYMBOL(hci_dev_all_close);
+/// Abon [END] - Add : Clos hci0 before suspend (201009171700)
+
 int hci_dev_close(__u16 dev)
 {
 	struct hci_dev *hdev;

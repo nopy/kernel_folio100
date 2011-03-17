@@ -76,7 +76,7 @@
 
 // Options for temperature monitoring
 #define NVRM_DTT_DISABLED (0)
-#define NVRM_DTT_USE_INTERRUPT (1)
+#define NVRM_DTT_USE_INTERRUPT (0)
 #define NVRM_DTT_RANGE_CHANGE_PRINTF (1)
 
 // Allow PMUs with CPU voltage range above chip minimum
@@ -270,6 +270,10 @@ do\
 #define DfsLogEnter(pDfs, Lp2TimeMs)
 #endif
 
+#ifdef CONFIG_TEGRA_TMON_PROC 
+extern NvU32 gTemperatureC ;
+#endif 
+
 /*****************************************************************************/
 
 #if NVRM_DTT_RANGE_CHANGE_PRINTF
@@ -277,7 +281,7 @@ do\
 #define DttRangeReport(T, pDtt) \
 do\
 {\
-    NvOsDebugPrintf("DTT: T = %d, Range = %d (%d : %d)\n", \
+    NvOsDebugPrintf("DTT: T= %d, Range= %d (%d : %d)\n", \
         (T), (pDtt)->TcorePolicy.PolicyRange, \
         (pDtt)->TcorePolicy.LowLimit, (pDtt)->TcorePolicy.HighLimit); \
 } while(0)
@@ -934,6 +938,7 @@ static NvError DfsHwInit(NvRmDfs* pDfs)
             }
         }
     }
+
     return error;
 }
 
@@ -1792,6 +1797,9 @@ DttClockUpdate(
         NvOsIntrMutexUnlock(pDfs->hIntrMutex);
     }
 
+#ifdef CONFIG_TEGRA_TMON_PROC /* export temperature to /proc/tmoninfo */
+	gTemperatureC = TemperatureC;
+#endif
     // Throttle clock frequencies, if necessary
     if (pDfs->hRm->ChipId.Id == 0x20)
         return NvRmPrivAp20DttClockUpdate(
@@ -1825,6 +1833,9 @@ static void DttIntrCallback(void* args)
         (void)NvOdmTmonParameterConfig(pDtt->hOdmTcore,
             NvOdmTmonConfigParam_IntrLimitHigh, &HighLimit);
         DttRangeReport(TemperatureC, pDtt);
+#ifdef CONFIG_TEGRA_TMON_PROC /* export temperature to /proc/tmoninfo */
+	gTemperatureC = TemperatureC;
+#endif
     }
 }
 

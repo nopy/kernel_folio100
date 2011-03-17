@@ -9,3 +9,4 @@ endif
 
 obj-$(CONFIG_TEGRA_ODM_HARMONY)		+= nvodm_mouse.o
 obj-$(CONFIG_TEGRA_ODM_VENTANA)		+= nvodm_mouse.o
+obj-$(CONFIG_TEGRA_ODM_BETELGEUSE)	+= nvodm_mouse.o

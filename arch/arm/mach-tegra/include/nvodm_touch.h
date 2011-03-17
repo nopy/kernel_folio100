@@ -214,7 +214,7 @@ typedef struct
     /// Indicates the number of fingers on the touch panel.
     NvU8 Fingers;
     /// Indicates an approximate finger pressure.
-    NvU8 Pressure[NVODM_MAX_INPUT_COORDS];
+    NvS8 Pressure[NVODM_MAX_INPUT_COORDS];
     /// Indicates the relative coordinate information.
     NvS8 XYDelta[NVODM_MAX_INPUT_COORDS][2];
 
@@ -272,7 +272,12 @@ typedef enum
     NvOdmTouchPowerMode_Force32 = 0x7fffffffUL
 } NvOdmTouchPowerModeType;
 
-
+#define NVODM_MAX_I2C_RAW_DATA 10
+typedef struct
+{
+    NvS8 datum[NVODM_MAX_I2C_RAW_DATA];
+    NvU32 data_len;
+} NvOdmTouchRawI2cData;
 
 /**
  * Gets a handle to the touch pad in the system.
@@ -382,6 +387,12 @@ void NvOdmTouchDeviceClose(NvOdmTouchDeviceHandle hDevice);
  */
 NvBool
 NvOdmTouchOutputDebugMessage(NvOdmTouchDeviceHandle hDevice);
+
+NvU32
+NvOdmTouchRawI2cWrite(NvOdmTouchDeviceHandle hDevice, NvOdmTouchRawI2cData *i2c_data);
+
+NvU32
+NvOdmTouchRawI2cRead(NvOdmTouchDeviceHandle hDevice, NvOdmTouchRawI2cData *i2c_data);
 
 /**
  * Gets the touch panel calibration data.
