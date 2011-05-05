@@ -15,4 +15,5 @@ obj-$(CONFIG_TEGRA_ODM_HARMONY)		+= nvodm_accelerometer_kxtf9.o
 obj-$(CONFIG_TEGRA_ODM_VENTANA)		+= nvodm_priv_accelerometer.o
 obj-$(CONFIG_TEGRA_ODM_VENTANA)		+= nvodm_accelerometer_bma150.o
 obj-$(CONFIG_TEGRA_ODM_VENTANA)		+= nvodm_accelerometer_kxtf9.o
+obj-$(CONFIG_INPUT_TEGRA_ODM_ACCEL)	+= nvodm_accelerometer_lsm303dlh.o
 

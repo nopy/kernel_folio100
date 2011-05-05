@@ -23,7 +23,7 @@
 
 #include "uvcvideo.h"
 
-#define UVC_Q_WAITON_TIMEOUT 250 /* mSec */
+#define UVC_Q_WAITON_TIMEOUT 500 /* mSec */
 
 /* ------------------------------------------------------------------------
  * Video buffers queue management.

@@ -6,6 +6,13 @@ ccflags-y += -DNV_DEBUG=1
 else
 ccflags-y += -DNV_DEBUG=0
 endif
+ifeq ($(CONFIG_TEGRA_ODM_BETELGEUSE),y)
+ccflags-y += -DCONFIG_TEGRA_ODM_HARMONY=betelgeuse
+endif
+
+ifeq ($(CONFIG_TEGRA_ODM_BETELGEUSE),y)
+ccflags-y += -DCONFIG_TEGRA_ODM_HARMONY=betelgeuse
+endif
 
 ccflags-y += -Iarch/arm/mach-tegra/odm_kit/adaptations/pmu
 ccflags-y += -Iarch/arm/mach-tegra/odm_kit/adaptations/pmu/tps6586x

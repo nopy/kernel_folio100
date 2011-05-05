@@ -106,6 +106,8 @@ typedef enum
     NvOdmBatteryEventType_RemainingCapacityAlarm = 0x10,
 
     NvOdmBatteryEventType_Num = 0x20,
+    //Daniel 20100716, for low battery interrupt
+    NvOdmBatteryEventType_LowBatteryIntr = 0x80,
 
     /// Ignore -- Forces compilers to make 32-bit enums.
     NvOdmBatteryEventType_Force32 = 0x7FFFFFFF
@@ -224,7 +226,8 @@ typedef enum
  * @return NV_TRUE if successful, or NV_FALSE otherwise.
  */
 NvBool NvOdmBatteryDeviceOpen(NvOdmBatteryDeviceHandle *hDevice,
-                              NvOdmOsSemaphoreHandle *hOdmSemaphore);
+                              NvOdmOsSemaphoreHandle *hOdmSemaphore,
+                              NvU32 *ec_version); //Daniel 20100823, put ec version to fs
 
 /**
  * Closes the handle for battery ODM.
@@ -347,5 +350,11 @@ NvBool NvOdmBatteryGetModel(
 #endif
 
 /** @} */
+
+void NvOdmBatteryDisableIntr(NvOdmBatteryDeviceHandle hDevice);
+
+void NvOdmBatteryEnableIntr(NvOdmBatteryDeviceHandle hDevice);
+
+void NvOdmBatteryEnableEcEvevt(NvOdmBatteryDeviceHandle hDevice);
 
 #endif // INCLUDED_NVODM_BATTERY_H

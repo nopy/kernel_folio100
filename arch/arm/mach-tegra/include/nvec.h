@@ -338,6 +338,7 @@ typedef enum
     NvEcPowerState_PowerDown,
     NvEcPowerState_Suspend,
     NvEcPowerState_Restart,
+    NvEcPowerState_Recovery, //Daniel 20100903, reboot to OTA
     NvEcPowerState_Num,
     NvEcPowerState_Force32 = 0x7FFFFFFF
 } NvEcPowerState;
@@ -995,6 +996,7 @@ typedef enum
     NvEcSleepSubtype_ApPowerDown = 0x1,
     NvEcSleepSubtype_ApSuspend = 0x2,
     NvEcSleepSubtype_ApRestart = 0x3,
+    NvEcSleepSubtype_ApRecovery = 0x8, //Daniel 20100903, reboot to OTA
 
     NvEcSleepSubtype_Num,
     NvEcSleepSubtype_Max = 0x7fffffff

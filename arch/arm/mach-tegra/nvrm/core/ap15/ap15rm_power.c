@@ -50,6 +50,10 @@
 #include "ap15rm_clocks.h"
 #include "ap15/arapbpm.h"
 #include "ap15/project_relocation_table.h"
+#include <linux/interrupt.h>
+#include "../board.h"
+
+
 
 // TODO: Always Disable before check-in
 // Module debug: 0=disable, 1=enable
@@ -90,7 +94,11 @@ static NvBool IsRunTimePowerGateSupported(NvU32 PowerGroup)
     switch (PowerGroup)
     {
         case NV_POWERGROUP_TD:
-            return NV_POWER_GATE_TD;
+//            return NV_POWER_GATE_TD;
+	     if(tegra_is_ap20_a03())
+		return 0;
+	     else 
+                return 1;
         case NV_POWERGROUP_PCIE:
             return NV_POWER_GATE_PCIE;
         case NV_POWERGROUP_VDE:

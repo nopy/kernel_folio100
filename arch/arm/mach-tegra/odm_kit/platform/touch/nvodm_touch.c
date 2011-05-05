@@ -25,6 +25,9 @@
 #if defined(NV_TOUCH_PANJIT)
 #include "nvodm_touch_panjit.h"
 #endif
+#if defined(NV_TOUCH_EETI)
+#include "nvodm_touch_eeti.h"
+#endif
 
 /** Implementation for the NvOdm TouchPad */
 
@@ -39,7 +42,9 @@ NvOdmTouchDeviceOpen( NvOdmTouchDeviceHandle *hDevice )
 #if defined(NV_TOUCH_PANJIT)
     ret = PANJIT_Open(hDevice);
 #endif
-
+#if defined(NV_TOUCH_EETI)
+    ret = EETI_Open(hDevice);
+#endif
     return ret;
 }
 
@@ -97,6 +102,17 @@ NvOdmTouchPowerOnOff(NvOdmTouchDeviceHandle hDevice, NvBool OnOff)
     hDevice->PowerOnOff(hDevice, OnOff);
 }
 
+NvU32
+NvOdmTouchRawI2cWrite(NvOdmTouchDeviceHandle hDevice, NvOdmTouchRawI2cData *i2c_data)
+{
+    return hDevice->RawI2cWrite(hDevice, i2c_data);
+}
+
+NvU32
+NvOdmTouchRawI2cRead(NvOdmTouchDeviceHandle hDevice, NvOdmTouchRawI2cData *i2c_data)
+{
+    return hDevice->RawI2cRead(hDevice, i2c_data);
+}
 
 NvBool
 NvOdmTouchOutputDebugMessage(NvOdmTouchDeviceHandle hDevice)

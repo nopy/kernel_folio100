@@ -977,8 +977,18 @@ int mmc_resume_bus(struct mmc_host *host)
 		host->bus_ops->resume(host);
 	}
 
+/* ATHENV */
+#if 0
 	if (host->bus_ops->detect && !host->bus_dead)
 		host->bus_ops->detect(host);
+#else
+	printk("*** %s: host->skip_detect=[0x%x]\n", __func__, host->skip_detect);
+	if (host->bus_ops->detect && !host->bus_dead && !host->skip_detect) {
+		printk("*** %s: do detecting\n", __func__);
+		host->bus_ops->detect(host);
+	}
+#endif
+/* ATHENV */
 
 	mmc_bus_put(host);
 	printk("%s: Deferred resume completed\n", mmc_hostname(host));

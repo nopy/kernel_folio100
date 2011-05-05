@@ -151,6 +151,19 @@ NvOdmVibStart(NvOdmVibDeviceHandle hDevice);
 NvBool
 NvOdmVibStop(NvOdmVibDeviceHandle hDevice);
 
+/* Init vibration mode */
+void 
+PegaVibModeInit(char *options);
+
+/* Set vibration mode */
+void 
+PgeaVibModeSet(int mode);
+
+/* Get vibration mode */
+int 
+PgeaVibModeGet(void);
+
+
 #if defined(__cplusplus)
 }
 #endif

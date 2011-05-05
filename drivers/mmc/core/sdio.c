@@ -448,6 +448,9 @@ static int mmc_sdio_suspend(struct mmc_host *host)
 	return err;
 }
 
+/* ATHENV */
+extern void ATHSetPowerOn(int IsEnable);
+/* ATHENV */
 static int mmc_sdio_resume(struct mmc_host *host)
 {
 	int i, err;
@@ -456,6 +459,9 @@ static int mmc_sdio_resume(struct mmc_host *host)
 	BUG_ON(!host->card);
 
 	/* Basic card reinitialization. */
+/* ATHENV */
+	ATHSetPowerOn(1);
+/* ATHENV */
 	mmc_claim_host(host);
 	err = mmc_sdio_init_card(host, host->ocr, host->card);
 	mmc_release_host(host);

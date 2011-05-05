@@ -18,9 +18,14 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
 
-
+#include <linux/kernel.h>  
+#include <linux/spinlock.h>
+#include <linux/proc_fs.h>
 #include "nvodm_tmon_adt7461.h"
 #include "tmon_hal.h"
+#if DEBUG_THERMALSENSOR
+#include <linux/kernel.h>  
+#endif
 
 // TODO: Always Disable before check-in
 // Always debug module: 0=disable, 1=enable
@@ -33,6 +38,13 @@
 #endif
 
 #define ADT7461_ALERT_DEBOUNCE (1)
+#define PRE_ER_WORKAROUND (0)
+#define PRE_ER_GMT_THERMALSENSOR (1)
+#define DEBUG_THERMALSENSOR (0)
+
+#ifdef CONFIG_TEGRA_TMON_PROC 
+extern NvU32 localTemperatureC;
+#endif
 
 // ADT7461 Descrriptor
 static const ADT7461Info s_Adt7461Info = 
@@ -508,8 +520,11 @@ NvBool Adt7461Init(NvOdmTmonDeviceHandle hTmon)
     if(!Adt7461WriteReg(pPrivData, pReg, Data))
         goto fail;
     pPrivData->ShadowConfig = Data;
+#if PRE_ER_GMT_THERMALSENSOR
+    ExtRange = 0; /* not support ADT thermal sensor*/
+#else
     ExtRange = ((Data & ADT7461ConfigBits_ExtendedRange) != 0);
-
+#endif
     // Program shutdown comparators settings
     Data = ADT7461_T_VALUE_TO_DATA(
         ExtRange, ADT7461_ODM_LOCAL_COMPARATOR_LIMIT_VALUE);
@@ -570,6 +585,7 @@ NvBool Adt7461Init(NvOdmTmonDeviceHandle hTmon)
     // TODO: check open remote circuit error
 
     Adt7461ReadAra(pPrivData);
+
     return NV_TRUE;
 
 fail:
@@ -659,11 +675,19 @@ Adt7461TemperatureGet(
     ADT7461ChannelID ChannelId;
     ADT7461PrivData* pPrivData;
     const ADT7461RegisterInfo* pReg;
+#if (DEBUG_THERMALSENSOR || CONFIG_TEGRA_TMON_PROC)
+	ADT7461RegisterInfo reg;
+	int i;
+#endif
 
     NV_ASSERT(hTmon && hTmon->pPrivate && pDegreesC);
     pPrivData = hTmon->pPrivate;
+#if PRE_ER_GMT_THERMALSENSOR
+    ExtRange = 0; /* not support ADT thermal sensor*/
+#else
     ExtRange = ((pPrivData->ShadowConfig &
                  ADT7461ConfigBits_ExtendedRange) != 0);
+#endif	
     ChannelId = pPrivData->ConnectivityMap[ZoneId];
     pReg = &pPrivData->pDeviceInfo->Channels[ChannelId].Tdata;
 
@@ -671,6 +695,35 @@ Adt7461TemperatureGet(
         return NV_FALSE;
 
     *pDegreesC = ADT7461_T_DATA_TO_VALUE(ExtRange, Data);
+
+#if CONFIG_TEGRA_TMON_PROC
+	reg.RdAddr = pReg->RdAddr - 1;	/* local temperature register address */
+	reg.WrAddr = pReg->WrAddr - 1;
+
+	if(!Adt7461ReadReg(pPrivData, &reg, &Data))
+		return NV_FALSE;
+       /* export temperature to /proc/localtmon */
+	localTemperatureC = (NvS32)ADT7461_T_DATA_TO_VALUE(ExtRange, Data);
+	   
+#endif
+
+#if DEBUG_THERMALSENSOR
+	printk("ChannelId:0x%x\n", ChannelId);	
+	printk("Temperature Data register pReg:0x%x\n", pReg);
+	printk("Temperature *pDegreesC:0x%x\n", *pDegreesC);
+	i = 0 ; 
+	reg.RdAddr = pReg->RdAddr - 1;
+	reg.WrAddr = pReg->WrAddr - 1;
+	while(i < 40 ){
+		if(!Adt7461ReadReg(pPrivData, &reg, &Data))
+			return NV_FALSE;
+		printk("register pReg:0x%x\n", reg.RdAddr);
+		printk("Data:0x%x, %d\n", ADT7461_T_DATA_TO_VALUE(ExtRange, Data), (NvS32)ADT7461_T_DATA_TO_VALUE(ExtRange, Data));
+		i++;
+		reg.RdAddr++;
+	}
+#endif
+
     return NV_TRUE;
 }
 
@@ -687,8 +740,12 @@ Adt7461CapabilitiesGet(
 
     NV_ASSERT(hTmon && hTmon->pPrivate && pCaps);
     pPrivData = hTmon->pPrivate;
+#if PRE_ER_GMT_THERMALSENSOR
+    ExtRange = 0; /* not support ADT thermal sensor*/
+#else
     ExtRange = ((pPrivData->ShadowConfig &
                  ADT7461ConfigBits_ExtendedRange) != 0);
+#endif		
     
     pCaps->Tmax = ADT7461_T_RANGE_LIMIT_HIGH(ExtRange);
     pCaps->Tmin = ADT7461_T_RANGE_LIMIT_LOW(ExtRange);
@@ -710,8 +767,13 @@ Adt7461ParameterCapsGet(
 
     NV_ASSERT(hTmon && hTmon->pPrivate && pCaps);
     pPrivData = hTmon->pPrivate;
+#if PRE_ER_GMT_THERMALSENSOR
+    ExtRange = 0; /* not support ADT thermal sensor*/
+#else
     ExtRange = ((pPrivData->ShadowConfig &
                  ADT7461ConfigBits_ExtendedRange) != 0);
+#endif			
+
     pChannel = &pPrivData->pDeviceInfo->Channels[(
         pPrivData->ConnectivityMap[ZoneId])];
 
@@ -763,24 +825,37 @@ Adt7461ParameterConfig(
 
     NV_ASSERT(hTmon && hTmon->pPrivate && pSetting);
     pPrivData = hTmon->pPrivate;
+#if PRE_ER_GMT_THERMALSENSOR
+    ExtRange = 0; /* not support ADT thermal sensor*/
+#else
     ExtRange = ((pPrivData->ShadowConfig &
                  ADT7461ConfigBits_ExtendedRange) != 0);
+#endif			
     pChannel = &pPrivData->pDeviceInfo->Channels[(
         pPrivData->ConnectivityMap[ZoneId])];
 
     switch (ParamId)
     {
         case NvOdmTmonConfigParam_IntrLimitHigh:
+#if PRE_ER_WORKAROUND
+            return NV_TRUE;
+#endif
             pReg = &pChannel->IntrLimitHigh;
             OdmProtected = pChannel->ChannelPolicy.IntrLimitsOdmProtected;
             break;
 
         case NvOdmTmonConfigParam_IntrLimitLow:
+#if PRE_ER_WORKAROUND
+            return NV_TRUE;
+#endif
             pReg = &pChannel->IntrLimitLow;
             OdmProtected = pChannel->ChannelPolicy.IntrLimitsOdmProtected;
             break;
 
         case NvOdmTmonConfigParam_HwLimitCrit:
+#if PRE_ER_WORKAROUND
+            return NV_TRUE;
+#endif
             pReg = &pChannel->ComparatorLimit;
             OdmProtected = pChannel->ChannelPolicy.HwLimitCritOdmProtected;
             break;
@@ -865,7 +940,11 @@ Adt7461IntrRegister(
     
     // Finally enable ADT7461 device interrupt output (interrupt may or may
     // not be generated depending on temperature and limt settings).
+#if PRE_ER_WORKAROUND
+    Data = pPrivData->ShadowConfig | (ADT7461ConfigBits_IntrDisabled);
+#else
     Data = pPrivData->ShadowConfig & (~ADT7461ConfigBits_IntrDisabled);
+#endif
     if(!Adt7461WriteReg(pPrivData, &pPrivData->pDeviceInfo->Config, Data))
     {
         NvOdmGpioInterruptUnregister(

@@ -47,6 +47,8 @@ typedef struct NvOdmTouchDeviceRec{
     NvBool (*PowerOnOff)        (NvOdmTouchDeviceHandle hDevice, NvBool OnOff);
     void   (*GetCapabilities)   (NvOdmTouchDeviceHandle hDevice, NvOdmTouchCapabilities* pCapabilities);
     NvBool (*GetCalibrationData)(NvOdmTouchDeviceHandle hDevice, NvU32 NumOfCalibrationData, NvS32* pRawCoordBuffer);
+    NvU32  (*RawI2cWrite)       (NvOdmTouchDeviceHandle hDevice, NvOdmTouchRawI2cData *i2c_data);
+    NvU32  (*RawI2cRead)        (NvOdmTouchDeviceHandle hDevice, NvOdmTouchRawI2cData *i2c_data);
     void   (*Close)             (NvOdmTouchDeviceHandle hDevice);
     NvU16                       CurrentSampleRate;
     NvBool                      OutputDebugMessage;

@@ -11,3 +11,4 @@ obj-$(CONFIG_TEGRA_ODM_HARMONY)		+= nvodm_keyboard.o
 obj-$(CONFIG_TEGRA_ODM_WHISTLER)	+= nvodm_keyboard_stub.o
 obj-$(CONFIG_TEGRA_ODM_CONCORDE)	+= nvodm_keyboard_stub.o
 obj-$(CONFIG_TEGRA_ODM_VENTANA)		+= nvodm_keyboard_stub.o
+obj-$(CONFIG_TEGRA_ODM_BETELGEUSE)	+= nvodm_keyboard.o

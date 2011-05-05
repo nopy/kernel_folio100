@@ -724,8 +724,10 @@ void __init setup_arch(char **cmdline_p)
 	if (tags->hdr.tag != ATAG_CORE)
 		tags = (struct tag *)&init_tags;
 
+#ifndef CONFIG_TEGRA_ODM_CARVEOUT_ADJUST
 	if (mdesc->fixup)
 		mdesc->fixup(mdesc, tags, &from, &meminfo);
+#endif
 
 	if (tags->hdr.tag == ATAG_CORE) {
 		if (meminfo.nr_banks != 0)
@@ -733,6 +735,11 @@ void __init setup_arch(char **cmdline_p)
 		save_atags(tags);
 		parse_tags(tags);
 	}
+
+#ifdef CONFIG_TEGRA_ODM_CARVEOUT_ADJUST
+	if (mdesc->fixup)
+		mdesc->fixup(mdesc, tags, &from, &meminfo);
+#endif
 
 	init_mm.start_code = (unsigned long) _text;
 	init_mm.end_code   = (unsigned long) _etext;

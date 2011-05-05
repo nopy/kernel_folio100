@@ -25,7 +25,7 @@
 #include "nvodm_pmu_tps6586x_adc.h"
 #include "nvodm_pmu_tps6586x_rtc.h"
 #include "pmu_hal.h"
-
+#include "nvos.h"
 /**************************************************************************
  * NOTE:
  *  + Please search "FIXME" and then change the code according to your tps6586x fuse
@@ -570,6 +570,35 @@ static const TPS6586xPmuSupplyInfo tps6586xSupplyInfoTable[] =
         {NV_FALSE,0,5000,5000,5000},
     },
 
+#if defined(CONFIG_TEGRA_ODM_BETELGEUSE)
+    {
+        Ext_SWITCHPmuSupply_VSleep,
+
+        {TPS6586x_RFF_INVALID, 0, 0, 0},
+        {TPS6586x_RFF_INVALID, 0, 0, 0},
+        NULL, NULL, NULL,
+        TPS6586x_RFF_INVALID,
+        {NV_FALSE,0,3300,3300,3300},
+    },
+    {
+        Ext_SWITCHPmuSupply_CamPwdn,
+
+        {TPS6586x_RFF_INVALID, 0, 0, 0},
+        {TPS6586x_RFF_INVALID, 0, 0, 0},
+        NULL, NULL, NULL,
+        TPS6586x_RFF_INVALID,
+        {NV_FALSE,0,3300,3300,3300},
+    },
+    {
+        Ext_SWITCHPmuSupply_WwanEn,
+
+        {TPS6586x_RFF_INVALID, 0, 0, 0},
+        {TPS6586x_RFF_INVALID, 0, 0, 0},
+        NULL, NULL, NULL,
+        TPS6586x_RFF_INVALID,
+        {NV_FALSE,0,3300,3300,3300},
+    },
+#endif
     {
         Ext_SWITCHPmuSupply_VDDIO_SD,
 
@@ -736,6 +765,11 @@ static NvBool g_ExternalSupplyEnabled[TPS6586x_EXTERNAL_SUPPLY_NUM] = { NV_FALSE
                                                                         NV_FALSE, // Ext_TPS72012PmuSupply_LDO (VDD_1V2: VCORE_WIFI...), enabled by PMU_GPIO2
                                                                         NV_TRUE,  // Ext_TPS74201PmuSupply_LDO (VDD_1V5), enabled by PMU_GPIO1
                                                                         NV_FALSE, // Ext_TPS2051BPmuSupply_VDDIO_VID, enabled by AP_GPIO Port T, Pin 2
+#if defined(CONFIG_TEGRA_ODM_BETELGEUSE)
+                                                                        NV_FALSE, // Ext_SWITCHPmuSupply_VSleep, enabled by AP_GPIO Port BB, Pin 4
+                                                                        NV_FALSE, // Ext_SWITCHPmuSupply_CamPwdn, enabled by AP_GPIO Port V, Pin 4
+                                                                        NV_FALSE, // Ext_SWITCHPmuSupply_WwanEn, enabled by AP_GPIO Port A, Pin 7
+#endif
                                                                         NV_FALSE, // Ext_SWITCHPmuSupply_VDDIO_SD, enabled by AP_GPIO Port T, Pin 3
                                                                         NV_TRUE,  // Ext_SWITCHPmuSupply_VDDIO_SDMMC
                                                                         NV_FALSE, // Ext_SWITCHPmuSupply_VDD_BL
@@ -770,6 +804,11 @@ Tps6586xReadVoltageReg(
         (vddRail == Ext_TPS72012PmuSupply_LDO)       ||
         (vddRail == Ext_TPS74201PmuSupply_LDO)       ||
         (vddRail == Ext_TPS2051BPmuSupply_VDDIO_VID) ||
+#if defined(CONFIG_TEGRA_ODM_BETELGEUSE)
+        (vddRail == Ext_SWITCHPmuSupply_VSleep)      ||
+        (vddRail == Ext_SWITCHPmuSupply_CamPwdn)     ||
+        (vddRail == Ext_SWITCHPmuSupply_WwanEn)      ||
+#endif
         (vddRail == Ext_SWITCHPmuSupply_VDDIO_SD)    ||
         (vddRail == Ext_SWITCHPmuSupply_VDDIO_SDMMC) ||
         (vddRail == Ext_SWITCHPmuSupply_VDD_BL)      ||
@@ -1004,6 +1043,18 @@ Tps6586xSetExternalSupply(
             }
             else
             {
+#if defined(CONFIG_TEGRA_ODM_BETELGEUSE)
+                if (vddRail == Ext_SWITCHPmuSupply_VSleep)
+                    NvOdmOsPrintf("wwwwwww %s disenaging power gating\n", __func__);
+                if (vddRail == Ext_SWITCHPmuSupply_CamPwdn)
+                {
+                    NvOdmOsPrintf("%s disengaging camera power gating\n", __func__);
+                    NvOdmGpioSetState(hPmu->hGpio,
+                                      hPmu->hPin[NVODM_EXT_AP_GPIO_RAIL(vddRail)],
+                                      NvOdmGpioPinActiveState_Low);
+                }
+                else
+#endif
                 NvOdmGpioSetState(hPmu->hGpio,
                                   hPmu->hPin[NVODM_EXT_AP_GPIO_RAIL(vddRail)],
                                   NvOdmGpioPinActiveState_High);
@@ -1011,10 +1062,27 @@ Tps6586xSetExternalSupply(
                 NvOdmGpioConfig(hPmu->hGpio,
                                 hPmu->hPin[NVODM_EXT_AP_GPIO_RAIL(vddRail)],
                                 NvOdmGpioPinMode_Output);
+                //Daniel 20101012, delay to wait +3VS ready, this delay is caused by EC.
+                if(vddRail == Ext_SWITCHPmuSupply_VSleep) { //20101227, +3VS only.
+                	//NvOdmOsPrintf("+3VS power-on delay 30ms, vddRail=0x%x\n", vddRail); 
+                    NvOsWaitUS(30000); //based on scope wave form, it's 12.5~21ms
+                }
             }
         }
         else
         {
+#if defined(CONFIG_TEGRA_ODM_BETELGEUSE)
+                if (vddRail == Ext_SWITCHPmuSupply_VSleep)
+                    NvOdmOsPrintf("wwwwwww %s enaging power gating\n", __func__);
+                if (vddRail == Ext_SWITCHPmuSupply_CamPwdn)
+                {
+                    NvOdmOsPrintf("%s engaging camera power gating\n", __func__);
+                    NvOdmGpioSetState(hPmu->hGpio,
+                                  hPmu->hPin[NVODM_EXT_AP_GPIO_RAIL(vddRail)],
+                                  NvOdmGpioPinActiveState_High);
+                }
+                else
+#endif
                 NvOdmGpioSetState(hPmu->hGpio,
                               hPmu->hPin[NVODM_EXT_AP_GPIO_RAIL(vddRail)],
                               NvOdmGpioPinActiveState_Low);
@@ -1054,6 +1122,11 @@ Tps6586xWriteVoltageReg(
         (vddRail != Ext_TPS72012PmuSupply_LDO)       &&
         (vddRail != Ext_TPS74201PmuSupply_LDO)       &&
         (vddRail != Ext_TPS2051BPmuSupply_VDDIO_VID) &&
+#if defined(CONFIG_TEGRA_ODM_BETELGEUSE)
+        (vddRail != Ext_SWITCHPmuSupply_VSleep)      &&
+        (vddRail != Ext_SWITCHPmuSupply_CamPwdn)     &&
+        (vddRail != Ext_SWITCHPmuSupply_WwanEn)      &&
+#endif
         (vddRail != Ext_SWITCHPmuSupply_VDDIO_SD)    &&
         (vddRail != Ext_SWITCHPmuSupply_VDDIO_SDMMC) &&
         (vddRail != Ext_SWITCHPmuSupply_VDD_BL)      &&
@@ -1079,6 +1152,11 @@ Tps6586xWriteVoltageReg(
             (vddRail == Ext_TPS72012PmuSupply_LDO)       ||
             (vddRail == Ext_TPS74201PmuSupply_LDO)       ||
             (vddRail == Ext_TPS2051BPmuSupply_VDDIO_VID) ||
+#if defined(CONFIG_TEGRA_ODM_BETELGEUSE)
+            (vddRail == Ext_SWITCHPmuSupply_VSleep)      ||
+            (vddRail == Ext_SWITCHPmuSupply_CamPwdn)     ||
+            (vddRail == Ext_SWITCHPmuSupply_WwanEn)      ||
+#endif
             (vddRail == Ext_SWITCHPmuSupply_VDDIO_SD)    ||
             (vddRail == Ext_SWITCHPmuSupply_VDDIO_SDMMC) ||
             (vddRail == Ext_SWITCHPmuSupply_VDD_BL)      ||
@@ -1151,6 +1229,11 @@ Tps6586xWriteVoltageReg(
                 (vddRail == Ext_TPS72012PmuSupply_LDO)       ||
                 (vddRail == Ext_TPS74201PmuSupply_LDO)       ||
                 (vddRail == Ext_TPS2051BPmuSupply_VDDIO_VID) ||
+#if defined(CONFIG_TEGRA_ODM_BETELGEUSE)
+                (vddRail == Ext_SWITCHPmuSupply_VSleep)      ||
+                (vddRail == Ext_SWITCHPmuSupply_CamPwdn)     ||
+                (vddRail == Ext_SWITCHPmuSupply_WwanEn)      ||
+#endif
                 (vddRail == Ext_SWITCHPmuSupply_VDDIO_SD)    ||
                 (vddRail == Ext_SWITCHPmuSupply_VDDIO_SDMMC) ||
                 (vddRail == Ext_SWITCHPmuSupply_VDD_BL)      ||
@@ -1409,11 +1492,13 @@ NvBool Tps6586xSetup(NvOdmPmuDeviceHandle hDevice)
         }
         hPmu->DeviceAddr = I2cAddress;
         hPmu->hOdmPmuSevice = NvOdmServicesPmuOpen();
+#if !defined(CONFIG_TEGRA_ODM_BETELGEUSE)       
         //if (NV_FALSE == Tps6586xWriteVoltageReg(hDevice, TPS6586xPmuSupply_LDO5, 3300, NULL))
         if (NV_FALSE == Tps6586xWriteVoltageReg(hDevice, TPS6586xPmuSupply_LDO5, 2850, NULL))
             NVODMPMU_PRINTF(("TPS: Fail to set the NVDDIO_NAND to 2.85V\n"));
         else
             NVODMPMU_PRINTF(("TPS: set the NVDDIO_NAND to 2.85V\n"));
+#endif    
     }
     else
     {

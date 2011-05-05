@@ -31,6 +31,7 @@
 #include <linux/gpio.h>
 #include <linux/console.h>
 #include <linux/reboot.h>
+#include <linux/kobject.h>
 
 #include <mach/iomap.h>
 #include <mach/io.h>
@@ -63,6 +64,17 @@
 #include "board.h"
 #include "nvrm_pmu.h"
 
+#if defined(CONFIG_TEGRA_ODM_BETELGEUSE)
+#include <linux/proc_fs.h>      /* Necessary because we use the proc fs */
+#include <asm/uaccess.h>        /* for copy_from_user */
+#endif
+
+#ifdef CONFIG_TEGRA_TMON_PROC
+#include <linux/spinlock.h>
+#include <linux/proc_fs.h>
+#include <linux/string.h>
+#endif
+
 # define BT_RESET 0
 # define BT_SHUTDOWN 1
 
@@ -70,6 +82,16 @@
 #include "nvodm_query_gpio.h"
 #include <linux/gpio_keys.h>
 #include <linux/input.h>
+#endif
+
+#if defined(CONFIG_TEGRA_ODM_BETELGEUSE)
+#include <linux/earlysuspend.h>
+#include "odm_kit/adaptations/pmu/tps6586x/nvodm_pmu_tps6586x_supply_info_table.h"
+NvOdmServicesPmuHandle s_hPmuServices;
+static int cond_camera_sate=0;	// Record current state is either CamSuppend or CamResume:
+				//	cond_camera_sate=0 :initial value ; 
+				//	cond_camera_sate=1 :CamSuppend ; 
+				//	cond_camera_sate=2 :CamResume
 #endif
 
 extern NvBool IsBoardTango(void);
@@ -201,7 +223,6 @@ static void tegra_debug_port_resume(void)
 	tegra_pinmux_config_tristate_table(uart_debug_port.pinmux,
 				uart_debug_port.nr_pins, TEGRA_TRI_NORMAL);
 }
-
 
 #ifdef CONFIG_MMC_SDHCI_TEGRA
 extern struct tegra_nand_platform tegra_nand_plat;
@@ -347,7 +368,7 @@ static void __init tegra_setup_sdhci(void) {
 	}
 #endif
 
-	for (i=0; i<ARRAY_SIZE(tegra_sdhci_platform); i++) {
+	for (i=ARRAY_SIZE(tegra_sdhci_platform)-1; i>=0; i--) {
 		const NvOdmQuerySdioInterfaceProperty *prop;
 		prop = NvOdmQueryGetSdioInterfaceProperty(i);
 		if (!prop || prop->usage==NvOdmQuerySdioSlotUsage_unused)
@@ -360,7 +381,7 @@ static void __init tegra_setup_sdhci(void) {
 		plat->is_removable = prop->IsCardRemovable;
 		plat->is_always_on = prop->AlwaysON;
 
-#ifdef CONFIG_MACH_VENTANA
+#ifdef CONFIG_TEGRA_VENTANA_WIFI
 		if (prop->usage == NvOdmQuerySdioSlotUsage_wlan)
 			plat->register_status_notify =
 				ventana_wifi_status_register;
@@ -1165,7 +1186,7 @@ static struct platform_device tegra_touch_device = {
 
 #ifdef CONFIG_INPUT_TEGRA_ODM_ACCEL
 static struct platform_device tegra_accelerometer_device = {
-	.name = "tegra_accelerometer",
+	.name = "lsm303dlh_acc",
 	.id   = -1,
 };
 #endif
@@ -1177,9 +1198,69 @@ static struct platform_device tegra_scrollwheel_device = {
 };
 #endif
 
+#ifdef CONFIG_TEGRA_ODM_VIBRATE
+static struct platform_device tegra_vibrator_device = {
+	.name = "tegra_vibrator",
+	.id = -1,
+};
+#endif
+
+/* Daniel20100805 */
+#ifdef CONFIG_INPUT_TEGRA_ODM_ECOMPASS 
+static struct platform_device tegra_ecompass_device =
+{
+    .name = "tegra_ecompass",
+    .id   = -1,
+};
+#endif
+
+#ifdef CONFIG_INPUT_TEGRA_ODM_DOCK
+static struct platform_device tegra_dock_device =  
+{
+    .name = "tegra_dock",
+    .id   = -1,
+};
+#endif
+
+#ifdef CONFIG_INPUT_TEGRA_ODM_CAPSENSOR             
+static struct platform_device tegra_capsensor_device =
+{
+    .name = "tegra_capsensor",
+    .id   = -1,
+};
+#endif
+
+#ifdef CONFIG_INPUT_TEGRA_ODM_OVCURRENT
+static struct platform_device tegra_usbovc_device =
+{
+    .name = "tegra_overcurrent",
+    .id   = -1,
+};
+#endif
+
+#if 1
+/* ATHENV */
+static struct platform_device tegra_wlan_ar6000_pm_device = {
+	.name		= "wlan_ar6000_pm",
+	.id		= 1,
+	.num_resources	= 0,
+	.resource	= NULL,
+};
+/* ATHENV */
+#endif
+
 static struct platform_device *nvodm_devices[] __initdata = {
 #ifdef CONFIG_RTC_DRV_TEGRA
 	&tegra_rtc_device,
+#endif
+#if 1
+/* ATHENV */
+    /* 
+     * It is necessary to put here in order to support WoW.
+     * Put it before MMC host controller in worst case 
+     */
+	&tegra_wlan_ar6000_pm_device,
+/* ATHENV */
 #endif
 #ifdef CONFIG_RTC_DRV_TEGRA_ODM
 	&tegra_rtc_odm_device,
@@ -1202,6 +1283,23 @@ static struct platform_device *nvodm_devices[] __initdata = {
 #ifdef CONFIG_INPUT_TEGRA_ODM_ACCEL
 	&tegra_accelerometer_device,
 #endif
+#ifdef CONFIG_TEGRA_ODM_VIBRATE
+	&tegra_vibrator_device,
+#endif
+#ifdef CONFIG_INPUT_TEGRA_ODM_CAPSENSOR
+	&tegra_capsensor_device,
+#endif
+#ifdef CONFIG_INPUT_TEGRA_ODM_ECOMPASS 
+        &tegra_ecompass_device,
+#endif
+#ifdef CONFIG_INPUT_TEGRA_ODM_DOCK
+	&tegra_dock_device,
+#endif
+
+#ifdef CONFIG_INPUT_TEGRA_ODM_OVCURRENT
+	&tegra_usbovc_device,
+#endif 
+
 };
 
 #ifdef CONFIG_SPI_TEGRA
@@ -1709,6 +1807,532 @@ static int __init tegra_setup_data(void)
 }
 postcore_initcall(tegra_setup_data);
 
+#if defined(CONFIG_TEGRA_ODM_BETELGEUSE)
+
+#define PROCFS_MAX_SIZE             512
+#define PROCFS_SYSINFO			"sysinfo"
+#define PROCFS_DMISTATUS		"dmi_status"
+#define PROCFS_DMIINFO		"dmi_info"
+#define PROCFS_ISMEDIAWORK		"isMediaWork"
+
+#define PRO_CMD_HP_IN 			"hp_in"
+#define PRO_CMD_HP_OUT 		"hp_out"
+
+static struct proc_dir_entry *proc_sysinfo;
+static struct proc_dir_entry *proc_dmistatus;
+static struct proc_dir_entry *proc_dmiinfo;
+static struct proc_dir_entry *proc_ismediawork;
+
+int  headphone_plug = { 0 };
+int  dmi_status = { 0 };
+char dmi_info[1024] = { 0 };
+int mediawork = { 0 };
+/**
+ * The buffer used to store character for this module
+ *
+ */
+static char procfs_buffer[PROCFS_MAX_SIZE];
+
+/**
+ * The size of the buffer
+ *
+ */
+static unsigned long procfs_buffer_size = 0;
+
+/** 
+ * This function is called then the /proc file is read
+ *
+ */
+int 
+procfile_sysinfo_read(char *buffer,
+              char **buffer_location,
+              off_t offset, int buffer_length, int *eof, void *data)
+{
+	int ret;
+	int len = 0;
+	        
+	if (offset > 0) {
+	        /* we have finished to read, return 0 */
+	        ret  = 0;
+	} else {
+	        /* fill the buffer, return the buffer size */
+			len +=sprintf(procfs_buffer+len, "----System Info-----\n");
+			len +=sprintf(procfs_buffer+len, "headphone plug :%d\n", headphone_plug);
+
+			procfs_buffer_size = len;
+			
+			memcpy(buffer, procfs_buffer, procfs_buffer_size);
+			ret = procfs_buffer_size;
+	}
+
+	return ret;
+}
+
+/**
+ * This function is called with the /proc file is written
+ *
+ */
+int procfile_sysinfo_write(struct file *file, const char *buffer, unsigned long count,
+                   void *data)
+{
+	/* get buffer size */
+	procfs_buffer_size = count;
+	if (procfs_buffer_size > PROCFS_MAX_SIZE ) {
+	        procfs_buffer_size = PROCFS_MAX_SIZE;
+	}
+
+	/* write data to the buffer */
+	if ( copy_from_user(procfs_buffer, buffer, procfs_buffer_size) ) {
+	        return -EFAULT;
+	}
+
+	/* headphone plug in/out */
+	if ( strncmp( procfs_buffer, PRO_CMD_HP_IN, sizeof(PRO_CMD_HP_IN)-1) == 0 ) {
+		headphone_plug = 1;
+	}else if ( strncmp( procfs_buffer, PRO_CMD_HP_OUT, sizeof(PRO_CMD_HP_OUT)-1) == 0 ){
+		headphone_plug = 0;
+	}
+
+	
+	return procfs_buffer_size;
+}
+
+	
+int proc_sysinfo_init(void)
+{
+	/* /proc/pega/sysinfo */
+	proc_sysinfo = create_proc_entry(PROCFS_SYSINFO, 0666, NULL);
+	if (proc_sysinfo == NULL) {
+	        printk(KERN_ALERT "Error: Could not initialize /proc/%s\n",
+	                	PROCFS_SYSINFO);
+	        return -ENOMEM;
+	}
+	proc_sysinfo->read_proc  = procfile_sysinfo_read;
+	proc_sysinfo->write_proc = procfile_sysinfo_write;
+	proc_sysinfo->mode         = S_IFREG |S_IRUGO|S_IWUGO;
+	proc_sysinfo->uid            = 0;
+	proc_sysinfo->gid            = 0;
+	proc_sysinfo->size           = 128;
+	printk(KERN_INFO "/proc/%s created\n", PROCFS_SYSINFO);
+
+	return 0;       /* everything is ok */
+}
+
+/** 
+ * This function is called then the /proc file is read
+ *
+ */
+int 
+procfile_dmistatus_read(char *buffer,
+              char **buffer_location,
+              off_t offset, int buffer_length, int *eof, void *data)
+{
+	int ret;	
+	        
+	if (offset > 0) {
+	        /* we have finished to read, return 0 */
+	        ret  = 0;
+	} else {
+		/* fill the buffer, return the buffer size */
+        	ret = sprintf(buffer, "%d", dmi_status);
+	}
+
+	return ret;
+}
+
+/**
+ * This function is called with the /proc file is written
+ *
+ */
+int procfile_dmistatus_write(struct file *file, const char *buffer, unsigned long count,
+                   void *data)
+{
+    /* get buffer size */
+    procfs_buffer_size = count;
+    if (procfs_buffer_size > PROCFS_MAX_SIZE ) {
+		procfs_buffer_size = PROCFS_MAX_SIZE;
+    }
+
+    /* write data to the buffer */
+    if ( copy_from_user(procfs_buffer, buffer, procfs_buffer_size) ) {
+            return -EFAULT;
+    }
+
+	dmi_status = *buffer - '0';
+    return procfs_buffer_size;
+}
+
+int proc_dmistatus_init(void)
+{	
+	proc_dmistatus = create_proc_entry(PROCFS_DMISTATUS, 0666, NULL);
+	if (proc_dmistatus == NULL) {
+	        printk(KERN_ALERT "Error: Could not initialize /proc/%s\n",
+	                	PROCFS_SYSINFO);
+	        return -ENOMEM;
+	}
+	proc_dmistatus->read_proc  = procfile_dmistatus_read;
+	proc_dmistatus->write_proc = procfile_dmistatus_write;
+	proc_dmistatus->mode         = S_IFREG |S_IRUGO|S_IWUGO;
+	proc_dmistatus->uid            = 0;
+	proc_dmistatus->gid            = 0;
+	proc_dmistatus->size           = 128;
+	printk(KERN_INFO "/proc/%s created\n", PROCFS_DMISTATUS);
+
+	return 0;       /* everything is ok */
+}
+
+/** 
+ * This function is called then the /proc file is read
+ *
+ */
+int 
+procfile_dmiinfo_read(char *buffer,
+              char **buffer_location,
+              off_t offset, int buffer_length, int *eof, void *data)
+{
+	int ret;	
+	        
+	if (offset > 0) {
+	        /* we have finished to read, return 0 */
+	        ret  = 0;
+	} else {
+		/* fill the buffer, return the buffer size */
+        	ret = sprintf(buffer, "%s", dmi_info);
+	}
+
+	return ret;
+}
+
+/**
+ * This function is called with the /proc file is written
+ *
+ */
+int procfile_dmiinfo_write(struct file *file, const char *buffer, unsigned long count,
+                   void *data)
+{
+    /* get buffer size */
+    procfs_buffer_size = count;
+    if (procfs_buffer_size > PROCFS_MAX_SIZE ) {
+		procfs_buffer_size = PROCFS_MAX_SIZE;
+    }
+
+    /* write data to the buffer */
+    if ( copy_from_user(procfs_buffer, buffer, procfs_buffer_size) ) {
+            return -EFAULT;
+    }
+
+    strncpy(dmi_info, buffer, sizeof(dmi_info)-1);
+    return procfs_buffer_size;
+}
+
+int proc_dmiinfo_init(void)
+{	
+	proc_dmiinfo = create_proc_entry(PROCFS_DMIINFO, 0666, NULL);
+	if (proc_dmiinfo == NULL) {
+	        printk(KERN_ALERT "Error: Could not initialize /proc/%s\n",
+	                	PROCFS_SYSINFO);
+	        return -ENOMEM;
+	}
+	proc_dmiinfo->read_proc  = procfile_dmiinfo_read;
+	proc_dmiinfo->write_proc = procfile_dmiinfo_write;
+	proc_dmiinfo->mode         = S_IFREG |S_IRUGO|S_IWUGO;
+	proc_dmiinfo->uid            = 0;
+	proc_dmiinfo->gid            = 0;
+	proc_dmiinfo->size           = 128;
+	printk(KERN_INFO "/proc/%s created\n", PROCFS_DMIINFO);
+
+	return 0;       /* everything is ok */
+}
+
+
+int proc_dmicache_init(void)
+{
+	proc_dmistatus_init();
+	proc_dmiinfo_init();
+
+	return 0;       /* everything is ok */
+}
+
+int procfile_ismediawork_read(char *buffer,
+              char **buffer_location,
+              off_t offset, int buffer_length, int *eof, void *data)
+{
+    int ret;
+
+	if (offset > 0) {
+        ret  = 0;
+    } else {
+        /* fill the buffer, return the buffer size */
+        ret = sprintf(buffer, "%d", mediawork);
+    }
+
+    return ret;
+}
+
+int procfile_ismediawork_write(struct file *file, const char *buffer, unsigned long count,
+                   void *data)
+{
+    /* get buffer size */
+    procfs_buffer_size = count;
+    if (procfs_buffer_size > PROCFS_MAX_SIZE ) {
+		procfs_buffer_size = PROCFS_MAX_SIZE;
+    }
+
+    /* write data to the buffer */
+    if ( copy_from_user(procfs_buffer, buffer, procfs_buffer_size) ) {
+            return -EFAULT;
+    }
+
+	mediawork = *buffer - '0';
+    return procfs_buffer_size;
+}
+
+int proc_ismediawork_init(void)
+{
+	proc_ismediawork = create_proc_entry(PROCFS_ISMEDIAWORK, 0666, NULL);
+	if (proc_ismediawork == NULL) {
+	        printk(KERN_ALERT "Error: Could not initialize /proc/%s\n",
+	                	PROCFS_ISMEDIAWORK);
+	        return -ENOMEM;
+	}
+	proc_ismediawork->read_proc  = procfile_ismediawork_read;
+	proc_ismediawork->write_proc = procfile_ismediawork_write;
+	proc_ismediawork->mode         = S_IFREG |S_IRUGO|S_IWUGO;
+	proc_ismediawork->uid            = 0;
+	proc_ismediawork->gid            = 0;
+	proc_ismediawork->size           = 128;
+	printk(KERN_INFO "/proc/%s created\n", PROCFS_ISMEDIAWORK);
+
+	return 0;       /* everything is ok */
+}
+#endif
+
+#if defined(CONFIG_TEGRA_ODM_BETELGEUSE)
+static int  TB2_PCB_BOARD_ID = 0;	
+int tegra_board_nvodm_board_id(void)
+{
+    return TB2_PCB_BOARD_ID;
+}
+
+/*
+    Test  for PCB ID
+*/
+static void __init tegra_config_pcb_id(void)
+{
+    const NvOdmPeripheralConnectivity *pConnectivity = NULL;
+    static NvOdmGpioPinHandle s_hPCBPin1 = NULL;
+    static NvOdmGpioPinHandle s_hPCBPin2 = NULL;
+    static NvOdmServicesGpioHandle s_hGpio = NULL;
+    int pinValue1,pinValue2;
+    pConnectivity = (NvOdmPeripheralConnectivity *)NvOdmPeripheralGetGuid(NV_ODM_GUID('b','o','a','r','d','i','d',' '));
+    if (!pConnectivity)
+    {
+       pr_err("ERROR Can not get pConnectivity\n");
+       goto ErrorExit;
+    }
+    
+    s_hGpio = NvOdmGpioOpen();
+        
+     if (!s_hGpio)
+     {
+        pr_err("ERROR configCameraGpio:s_hGpio=null, can not get NvOdmServicesGpioHandle\n");	
+        goto ErrorExit;
+     }
+     
+     s_hPCBPin1 = NvOdmGpioAcquirePinHandle(s_hGpio, 
+        						pConnectivity->AddressList[0].Instance,
+							pConnectivity->AddressList[0].Address);              
+
+     NvOdmGpioConfig(s_hGpio,s_hPCBPin1, NvOdmGpioPinMode_InputData);  
+
+     s_hPCBPin2 = NvOdmGpioAcquirePinHandle(s_hGpio, 
+        						pConnectivity->AddressList[1].Instance,
+							pConnectivity->AddressList[1].Address);              
+     
+     NvOdmGpioConfig(s_hGpio,s_hPCBPin2, NvOdmGpioPinMode_InputData);    
+     
+     NvOdmGpioGetState(s_hGpio,s_hPCBPin1, &pinValue1);
+     NvOdmGpioGetState(s_hGpio,s_hPCBPin2, &pinValue2);
+     TB2_PCB_BOARD_ID |= (pinValue1 <<1);
+     TB2_PCB_BOARD_ID |=  pinValue2;
+     pr_err(">>>>>>>>TB2 PCB Board ID %1d.%1d TB2_PCB_BOARD_ID = %d <<<<<<<<<<<\n",pinValue1,pinValue2, TB2_PCB_BOARD_ID);	
+     NvOdmGpioReleasePinHandle(s_hGpio, s_hPCBPin1);
+     NvOdmGpioReleasePinHandle(s_hGpio, s_hPCBPin2);     
+     NvOdmGpioClose(s_hGpio);        
+ErrorExit:
+    return;
+}
+
+void betelgeuse_camera_do_pm(struct platform_device *pdev ,int event);
+static void CamSuspend(struct early_suspend *h)
+{
+    if ( cond_camera_sate==1 )return ;
+
+    betelgeuse_camera_do_pm(&tegra_hcd[1] ,PM_EVENT_SUSPEND );
+    NvOdmServicesPmuSetVoltage(s_hPmuServices, Ext_SWITCHPmuSupply_CamPwdn, NVODM_VOLTAGE_OFF, NULL);
+
+    cond_camera_sate=1;
+}
+
+static void CamResume(struct early_suspend *h)
+{
+    if ( cond_camera_sate==2 )return ;
+
+	NvOdmServicesPmuSetVoltage(s_hPmuServices, Ext_SWITCHPmuSupply_CamPwdn, 3300, NULL);
+    betelgeuse_camera_do_pm(&tegra_hcd[1] ,PM_EVENT_RESUME );
+
+    cond_camera_sate=2;
+}
+
+static struct early_suspend CamEarlySuspend = {
+    .level = EARLY_SUSPEND_LEVEL_STOP_DRAWING,
+    .suspend = CamSuspend,
+    .resume = CamResume,
+};
+#endif
+
+#ifdef CONFIG_TEGRA_TMON_PROC /* temperature sensor */
+NvU32 gTemperatureC = 0;
+NvU32 localTemperatureC = 0;
+
+static DEFINE_MUTEX(tmon_list_lock);
+static int tegra_tmon_read_proc(char *page, char **start, off_t off, int count, int *eof, void *data)
+{
+	int len = 0;
+	
+	mutex_lock(&tmon_list_lock);
+	len += snprintf(page+len, count-len,"%d", gTemperatureC);
+	mutex_unlock(&tmon_list_lock);
+	*eof = 1;
+
+	return len;
+}
+
+static int tegra_localtmon_read_proc(char *page, char **start, off_t off, int count, int *eof, void *data)
+{
+	int len = 0;
+
+	mutex_lock(&tmon_list_lock);
+	len += snprintf(page+len, count-len,"%d", localTemperatureC);
+	mutex_unlock(&tmon_list_lock);
+
+	*eof = 1;
+	return len;
+}
+
+static DEFINE_MUTEX(pcbid_list_lock);
+static int tegra_pcbid_read_proc(char *page, char **start, off_t off, int count, int *eof, void *data)
+{
+	int len = 0;
+
+	mutex_lock(&pcbid_list_lock);
+	len += snprintf(page+len, count-len,"%d", tegra_board_nvodm_board_id());
+	mutex_unlock(&pcbid_list_lock);
+
+	*eof = 1;
+	return len;
+}
+#endif 
+
+#if defined(CONFIG_TEGRA_ODM_USB_HUB_INTR)
+/*
+    USB HUB SUSPEND PIN handle for hotplug
+*/
+static NvOdmServicesGpioHandle s_hUsbHubGpio = NULL;
+static NvOdmGpioPinHandle s_hUsbHubPin = NULL;
+static NvOdmServicesGpioIntrHandle s_hUsbHubIntrHandle = NULL;
+
+
+/* get GPIO_PW2 status  */
+static void tegra_usb_hub_hotplug_intr_hdr(void *arg)
+{
+	
+	int ret = -1;
+
+	ret = send_usb_hub_uevent_sock();
+	if(ret != 0) {
+		pr_err("ERROR send_usb_hub_uevent_sock failed\n");
+	}
+	
+	NvOdmGpioInterruptDone(s_hUsbHubIntrHandle);
+}
+
+static void __init tegra_config_usb_hub_hotplug(void)
+{
+	const NvOdmPeripheralConnectivity *pConnectivity = NULL;	
+	NvOdmInterruptHandler IntrHandler = (NvOdmInterruptHandler)tegra_usb_hub_hotplug_intr_hdr;
+
+	pConnectivity = (NvOdmPeripheralConnectivity *)NvOdmPeripheralGetGuid(NV_ODM_GUID('u','s','b','h','u','b','s','u'));
+	if (!pConnectivity)
+	{
+		pr_err("ERROR Can not get pConnectivity\n");
+		goto Exit;
+	}
+
+	s_hUsbHubGpio = NvOdmGpioOpen();
+
+	if (!s_hUsbHubGpio)
+	{
+		pr_err("ERROR tegra_config_usb_hub_hotplug: NvOdmGpioOpen fail\n");	
+		goto Exit;
+	}
+
+	s_hUsbHubPin = NvOdmGpioAcquirePinHandle(s_hUsbHubGpio, 
+										pConnectivity->AddressList[0].Instance,
+										pConnectivity->AddressList[0].Address);
+	
+	NvOdmGpioConfig(s_hUsbHubGpio, s_hUsbHubPin, NvOdmGpioPinMode_InputData);  
+
+	/* register interrupt handler for GPIO_PW2 status */
+	if (NvOdmGpioInterruptRegister(s_hUsbHubGpio, &s_hUsbHubIntrHandle,
+									 s_hUsbHubPin, NvOdmGpioPinMode_InputInterruptFallingEdge,
+									 IntrHandler, (void *)NULL, 0) == NV_FALSE)
+	{
+		NvOsDebugPrintf (("ERROR tegra_config_usb_hub_hotplug: NvOdmGpioInterruptRegister"));
+	}
+
+Exit:
+    return;
+}
+#endif
+
+
+#if 0
+/* paul porting for 9.12.13 */
+static void __init tegra_configCameraGpio(void)
+{
+    const NvOdmPeripheralConnectivity *pConnectivity = NULL;
+    static NvOdmGpioPinHandle s_hCarmeraPin = NULL;
+    static NvOdmServicesGpioHandle s_hGpio = NULL;
+
+    pConnectivity = (NvOdmPeripheralConnectivity *)NvOdmPeripheralGetGuid(NV_ODM_GUID('c','a','m','e','r','a',' ',' '));
+
+    s_hGpio = NvOdmGpioOpen();
+    if (!s_hGpio)
+    {
+        pr_err("ERROR configCameraGpio:s_hGpio=null, can not get NvOdmServicesGpioHandle\n");	
+        goto ErrorExit;
+    }
+
+    if (!s_hCarmeraPin)
+        s_hCarmeraPin = NvOdmGpioAcquirePinHandle(s_hGpio, 
+        						pConnectivity->AddressList[0].Instance,
+							pConnectivity->AddressList[0].Address);
+
+    if (!s_hCarmeraPin)
+    {
+        NvOdmGpioClose(s_hGpio);
+        s_hGpio = NULL;
+	 pr_err("ERROR configCameraGpio: ERROR NvOdmGpioAcquirePinHandle: Not able to Acq pinhandle\n");	
+    }else{
+        NvOdmGpioConfig(s_hGpio,s_hCarmeraPin, NvOdmGpioPinMode_Output);
+        NvOdmGpioSetState(s_hGpio, s_hCarmeraPin, 0x0);
+	 //pr_err("configCameraGpio: config GPIO_PV4 as output pin\n");		
+    }
+ErrorExit:
+    return;
+}
+#endif
 void __init tegra_setup_nvodm(bool standard_i2c, bool standard_spi)
 {
 	NvRmGpioOpen(s_hRmGlobal, &s_hGpioGlobal);
@@ -1718,6 +2342,13 @@ void __init tegra_setup_nvodm(bool standard_i2c, bool standard_spi)
 	tegra_setup_sdhci();
 	tegra_setup_rfkill();
 	tegra_setup_kbc();
+#if defined(CONFIG_TEGRA_ODM_BETELGEUSE)	
+    tegra_config_pcb_id();    /* TB2 PCB ID */
+	//tegra_configCameraGpio(); /*paul : porting for 9.12.13 */
+#endif
+#if defined(CONFIG_TEGRA_ODM_USB_HUB_INTR)	
+	tegra_config_usb_hub_hotplug();
+#endif
 	tegra_setup_gpio_key();
 	if (standard_i2c)
 		tegra_setup_i2c();
@@ -1727,24 +2358,43 @@ void __init tegra_setup_nvodm(bool standard_i2c, bool standard_spi)
 	pm_power_off = tegra_system_power_off;
 	tegra_setup_suspend();
 	tegra_setup_reboot();
+#if defined(CONFIG_TEGRA_ODM_BETELGEUSE)	
+	proc_sysinfo_init();
+	proc_dmicache_init();
+	proc_ismediawork_init();
+	s_hPmuServices = NvOdmServicesPmuOpen();
+        NvOdmServicesPmuSetVoltage(s_hPmuServices, Ext_SWITCHPmuSupply_VSleep, 3300, NULL);
+	NvOdmServicesPmuSetVoltage(s_hPmuServices, Ext_SWITCHPmuSupply_CamPwdn, 3300, NULL);
+	register_early_suspend(&CamEarlySuspend);
+#endif
+#ifdef CONFIG_TEGRA_TMON_PROC
+	create_proc_read_entry("tmoninfo", S_IRUGO, NULL, tegra_tmon_read_proc, NULL);
+	create_proc_read_entry("localtmon", S_IRUGO, NULL, tegra_localtmon_read_proc, NULL);
+	create_proc_read_entry("pcbid", S_IRUGO, NULL, tegra_pcbid_read_proc, NULL);
+#endif
 }
 
 void tegra_board_nvodm_suspend(void)
 {
 	if (console_suspend_enabled)
 		tegra_debug_port_suspend();
-#ifdef CONFIG_TEGRA_ODM_VENTANA
-        tegra_pinmux_set_pullupdown(TEGRA_PINGROUP_SDC, TEGRA_PUPD_NORMAL);
-        tegra_pinmux_set_pullupdown(TEGRA_PINGROUP_SDD, TEGRA_PUPD_NORMAL);
+#if defined(CONFIG_TEGRA_ODM_BETELGEUSE)
+        NvOdmServicesPmuSetVoltage(s_hPmuServices, Ext_SWITCHPmuSupply_VSleep, NVODM_VOLTAGE_OFF, NULL);
 #endif
 }
 
 void tegra_board_nvodm_resume(void)
 {
+#if defined(CONFIG_TEGRA_ODM_BETELGEUSE)
+        NvOdmServicesPmuSetVoltage(s_hPmuServices, Ext_SWITCHPmuSupply_VSleep, 3300, NULL);
+#endif
 	if (console_suspend_enabled)
 		tegra_debug_port_resume();
-#ifdef CONFIG_TEGRA_ODM_VENTANA
-        tegra_pinmux_set_pullupdown(TEGRA_PINGROUP_SDC, TEGRA_PUPD_PULL_UP);
-        tegra_pinmux_set_pullupdown(TEGRA_PINGROUP_SDD, TEGRA_PUPD_PULL_UP);
-#endif
 }
+#if defined(CONFIG_TEGRA_ODM_BETELGEUSE)
+//for, camera device power resume earilier than Late_Resume
+void tegra_board_nvodm_end(void){
+   CamResume(NULL);
+}
+#endif
+

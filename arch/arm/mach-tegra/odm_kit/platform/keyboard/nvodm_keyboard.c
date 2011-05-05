@@ -23,6 +23,9 @@
 #include "nvodm_query_gpio.h"
 #include "nvrm_gpio.h"
 #include "nvec.h"
+#if defined(CONFIG_TEGRA_ODM_BETELGEUSE)
+#include <linux/kernel.h>
+#endif
 
 // Module debug: 0=disable, 1=enable
 #define NVODM_ENABLE_PRINTF      0
@@ -223,11 +226,22 @@ NvBool NvOdmKeyboardInit(void)
 
 cleanup:
 #if WAKE_FROM_KEYBOARD
+#if defined(CONFIG_TEGRA_ODM_BETELGEUSE)
+  if (hOdm)
+  {
+    if (hOdm->GpioIntrHandle)
+    {
 	NvRmGpioInterruptUnregister(s_hGpioGlobal, s_hRmGlobal, hOdm->GpioIntrHandle);
 	hOdm->GpioIntrHandle = NULL;
+    }
+    if (hOdm->hPin)
+    {
 	NvRmGpioReleasePinHandles(s_hGpioGlobal, &hOdm->hPin, hOdm->PinCount);
+    }
 	NvOdmOsFree(hOdm);
 	hOdm = NULL;
+  }
+#endif //defined(CONFIG_TEGRA_ODM_BETELGEUSE)
 #endif
     (void)NvEcUnregisterForEvents(s_hEcEventRegistration);
     s_hEcEventRegistration = NULL;

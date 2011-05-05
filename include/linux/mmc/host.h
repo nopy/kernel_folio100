@@ -163,6 +163,9 @@ struct mmc_host {
 	unsigned int		max_req_size;	/* maximum number of bytes in one req */
 	unsigned int		max_blk_size;	/* maximum size of one mmc block */
 	unsigned int		max_blk_count;	/* maximum number of blocks in one req */
+/* ATHENV */
+	unsigned int		skip_detect;
+/* ATHENV */
 
 	/* private data */
 	spinlock_t		lock;		/* lock for claim and bus ops */
@@ -218,7 +221,9 @@ struct mmc_host {
 		int				num_funcs;
 	} embedded_sdio_data;
 #endif
-
+/* ATHENV*/
+//    int    suspend_keep_power;
+/* ATHENV*/
 	unsigned long		private[0] ____cacheline_aligned;
 };
 
