@@ -24,6 +24,7 @@
 #include <linux/pda_power.h>
 #include <linux/io.h>
 #include <linux/usb/android_composite.h>
+#include <linux/usb/f_accessory.h>
 #include <linux/i2c.h>
 
 #include <asm/mach-types.h>
@@ -124,7 +125,7 @@ static struct android_usb_product tegra_android_products[] = {
 		.num_functions = ARRAY_SIZE(tegra_android_functions_rndis_adb),
 		.functions = tegra_android_functions_rndis_adb,
 	},
-#ifdef CONFIG_USB_ACCESSORY
+#ifdef CONFIG_USB_ANDROID_ACCESSORY
 	[4] = {
 		.vendor_id = USB_ACCESSORY_VENDOR_ID,
 		.product_id = USB_ACCESSORY_PRODUCT_ID,
