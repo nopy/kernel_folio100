@@ -568,12 +568,12 @@ static int tegra_touch_thread(void *pdata) {
 */
 			/* report co-ordinates to the multi-touch stack */
             for (i = 0; i < SUPPORTED_FINGERS; i++) {
-                if (Pressure[i] >= 0 && ( Width[i] >= 0 || x[i] >= 0 || y[i] >= 0 ) ) {
-				input_report_abs(touch->input_dev, ABS_MT_SLOT, i ) ;
+                if (Pressure[i] >= 0  ) {
+	//			input_report_abs(touch->input_dev, ABS_MT_SLOT, i ) ;
 				input_report_abs(touch->input_dev, ABS_MT_TRACKING_ID, i ) ;
 
-//				input_report_abs(touch->input_dev,
-//					ABS_MT_TOUCH_MAJOR, Pressure[i]);
+				input_report_abs(touch->input_dev,
+					ABS_MT_TOUCH_MAJOR, Pressure[i]);
 //				input_report_abs(touch->input_dev,
 //					ABS_MT_WIDTH_MAJOR, Width[i]);
 				input_report_abs(touch->input_dev,
@@ -581,12 +581,16 @@ static int tegra_touch_thread(void *pdata) {
 				input_report_abs(touch->input_dev,
 					ABS_MT_POSITION_Y, y[i]);
 				input_report_abs(touch->input_dev, ABS_MT_PRESSURE, Pressure[i]*255 ) ;
-				printk("reporting (X,Y,PRESSURE) == (%d,%d,%d)\n", x[i], y[i], Pressure[i] ) ;
 
-//				input_mt_sync(touch->input_dev);
                 }
+		if( Pressure[i] != -1 ) {
+				input_mt_sync(touch->input_dev);
+		}
             }
 			input_sync(touch->input_dev);
+			if( Pressure[fingers] == 0 ) {
+				Pressure[fingers] = -1 ;
+			}
 
 			bKeepReadingSamples = NV_FALSE;
 			if (!touch->bPollingMode &&
@@ -655,7 +659,7 @@ static int __init tegra_touch_probe(struct platform_device *pdev)
 	__set_bit(INPUT_PROP_DIRECT, touch->input_dev->propbit ) ;
 
 	/* Will generate sync at the end of all input */
-	//set_bit(EV_SYN, touch->input_dev->evbit);
+	set_bit(EV_SYN, touch->input_dev->evbit);
 	/* Event is key input type */
 	//set_bit(EV_KEY, touch->input_dev->evbit);
 	/* Input values are in absoulte values */
@@ -667,11 +671,11 @@ static int __init tegra_touch_probe(struct platform_device *pdev)
 	//}
 	touch->bIsSuspended = NV_FALSE;
 	/* expose multi-touch capabilities */
-	//set_bit(ABS_MT_TOUCH_MAJOR, touch->input_dev->keybit);
+	set_bit(ABS_MT_TOUCH_MAJOR, touch->input_dev->absbit);
 	set_bit(ABS_MT_POSITION_X, touch->input_dev->absbit);
 	set_bit(ABS_MT_POSITION_Y, touch->input_dev->absbit);
 	set_bit(ABS_MT_PRESSURE, touch->input_dev->absbit);
-	set_bit(ABS_MT_SLOT, touch->input_dev->absbit);
+	//set_bit(ABS_MT_SLOT, touch->input_dev->absbit);
 	set_bit(ABS_MT_TRACKING_ID, touch->input_dev->absbit);
 	//set_bit(ABS_X, touch->input_dev->keybit);
 	//set_bit(ABS_Y, touch->input_dev->keybit);
@@ -706,7 +710,10 @@ static int __init tegra_touch_probe(struct platform_device *pdev)
 		touch->MinY, touch->MaxY, 0, 0);
 	input_set_abs_params(touch->input_dev, ABS_MT_PRESSURE, 0, 255, 0, 0) ;
 	input_set_abs_params(touch->input_dev, ABS_MT_TRACKING_ID, 0, 4, 0, 0) ;
-	input_set_abs_params(touch->input_dev, ABS_MT_SLOT, 0, 4, 0, 0) ;
+	//input_set_abs_params(touch->input_dev, ABS_MT_SLOT, 0, 4, 0, 0) ;
+
+	input_set_abs_params(touch->input_dev, ABS_MT_TOUCH_MAJOR,
+			0, caps->MaxNumberOfPressureReported, 0, 0);
 /*
 	if (caps->IsPressureSupported) {
 		input_set_abs_params(touch->input_dev, ABS_MT_TOUCH_MAJOR,
