@@ -3,8 +3,14 @@
 #The config for the kernel is arch/arm/configs/gaosp_msm_defconfig
 LOCAL_PATH := $(call my-dir)
 ifdef BUILD_KERNEL
+ifeq ($(TARGET_BOOTLOADER_BOARD_NAME),folio100)
+
+include $(CLEAR_VARS)
+
 KERNEL_OUT := $(TARGET_OUT_INTERMEDIATES)/kernel
 KERNEL_CONFIG := $(KERNEL_OUT)/.config
+KERNEL_SRC := $(LOCAL_PATH)
+$(warning LOCAL_PATH $(LOCAL_PATH))
 TARGET_PREBUILT_KERNEL := $(KERNEL_OUT)/arch/arm/boot/zImage
 $(TARGET_PREBUILT_KERNEL):= build_kernel
 
@@ -18,5 +24,6 @@ $(KERNEL_CONFIG): $(LOCAL_PATH)/arch/arm/configs/tegra_betelgeuse_android_defcon
 	$(transform-prebuilt-to-target)
 
 $(TARGET_PREBUILT_KERNEL): $(KERNEL_OUT) $(KERNEL_CONFIG)
-	$(MAKE) -C nv-kernel O=../$(KERNEL_OUT) ARCH=arm CROSS_COMPILE=$(shell pwd)/prebuilt/linux-x86/toolchain/arm-eabi-4.4.0/bin/arm-eabi- INSTALL_MOD_STRIP=1
+	$(MAKE) -C $(KERNEL_SRC) O=../../$(KERNEL_OUT) ARCH=arm CROSS_COMPILE=$(shell pwd)/prebuilt/linux-x86/toolchain/arm-eabi-4.4.0/bin/arm-eabi- INSTALL_MOD_STRIP=1
+endif
 endif
