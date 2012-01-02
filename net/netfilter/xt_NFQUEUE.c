@@ -49,7 +49,7 @@ static u32 hash_v4(const struct sk_buff *skb)
 }
 
 static unsigned int
-nfqueue_tg4_v1(struct sk_buff *skb, const struct xt_target_param *par)
+nfqueue_tg4_v1(struct sk_buff *skb, const struct xt_action_param *par)
 {
 	const struct xt_NFQ_info_v1 *info = par->targinfo;
 	u32 queue = info->queuenum;
@@ -74,7 +74,7 @@ static u32 hash_v6(const struct sk_buff *skb)
 }
 
 static unsigned int
-nfqueue_tg6_v1(struct sk_buff *skb, const struct xt_target_param *par)
+nfqueue_tg6_v1(struct sk_buff *skb, const struct xt_action_param *par)
 {
 	const struct xt_NFQ_info_v1 *info = par->targinfo;
 	u32 queue = info->queuenum;

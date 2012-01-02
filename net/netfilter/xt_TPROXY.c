@@ -160,9 +160,9 @@ tproxy_tg4(struct sk_buff *skb, __be32 laddr, __be16 lport,
 		   targets on the same rule yet */
 		skb->mark = (skb->mark & ~mark_mask) ^ mark_value;
 
-		pr_debug("redirecting: proto %hhu %pI6:%hu -> %pI6:%hu, mark: %x\n",
-				tproto, &iph->saddr, ntohs(hp->dest),
-				&tgi->laddr.in6, ntohs(tgi->lport), skb->mark);
+		//pr_debug("redirecting: proto %hhu %pI6:%hu -> %pI6:%hu, mark: %x\n",
+		//		tproto, &iph->saddr, ntohs(hp->dest),
+		//		&tgi->laddr.in6, ntohs(tgi->lport), skb->mark);
 
 		nf_tproxy_assign_sock(skb, sk);
 		return NF_ACCEPT;
