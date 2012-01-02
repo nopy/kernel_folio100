@@ -2373,6 +2373,16 @@ void tegra_board_nvodm_suspend(void)
 #endif
 }
 
+
+/* This function is called from ar6000.ko */
+/* For some reason this does not work so we will just enable power */
+static int wlan_setup_power(int on, int detect)
+{
+pr_info("%s: WIFI Power: on: %i, detect:%i\n", __func__, on, detect);
+return 0;
+}
+EXPORT_SYMBOL(wlan_setup_power);
+
 void tegra_board_nvodm_resume(void)
 {
 #if defined(CONFIG_TEGRA_ODM_BETELGEUSE)
